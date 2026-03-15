@@ -1,5 +1,6 @@
 """Training runner: RunnerState, train_step factory, and top-level train()."""
 
+from pathlib import Path
 from typing import Any, Callable, NamedTuple
 
 import jax
@@ -302,29 +303,68 @@ def train(cfg: DictConfig) -> tuple[RunnerState, list[TrainMetrics]]:
     """Run the full PPO training loop.
 
     Uses a Python for-loop over jit-compiled train_steps so that
-    logging/checkpointing can be interleaved (Step 6).
+    logging/checkpointing can be interleaved.
     """
-    key          = jax.random.PRNGKey(int(cfg.seed))
-    env_params   = env_params_from_cfg(cfg.env)
-    n_updates    = int(cfg.n_updates)
-    log_every    = int(cfg.log_every)
+    from starjaxrl.training.checkpoint import CheckpointManager
+    from starjaxrl.training.logging import (
+        finish_logging,
+        init_logging,
+        log_metrics,
+        run_eval_episode,
+    )
+
+    key               = jax.random.PRNGKey(int(cfg.seed))
+    env_params        = env_params_from_cfg(cfg.env)
+    n_updates         = int(cfg.n_updates)
+    log_every         = int(cfg.log_every)
+    checkpoint_every  = int(cfg.checkpoint_every)
+    eval_every        = int(cfg.eval_every)
 
     runner_state, graphdef, optimizer = init_runner(cfg, key)
     train_step   = jax.jit(make_train_step(graphdef, optimizer, env_params, cfg))
+
+    wandb_active = init_logging(cfg)
+    ckpt_manager = CheckpointManager(Path("checkpoints"))
 
     all_metrics: list[TrainMetrics] = []
 
     for update in range(n_updates):
         runner_state, metrics = train_step(runner_state, None)
         all_metrics.append(metrics)
+        step = update + 1
 
-        if (update + 1) % log_every == 0:
+        if step % log_every == 0:
             print(
-                f"update {update + 1:4d}/{n_updates} | "
+                f"update {step:4d}/{n_updates} | "
                 f"reward {float(metrics.mean_reward):+.3f} | "
                 f"pg {float(metrics.pg_loss):.4f} | "
                 f"vf {float(metrics.vf_loss):.4f} | "
                 f"ent {float(metrics.entropy):.4f}"
             )
 
+        # --- Logging ---
+        if wandb_active and step % log_every == 0:
+            log_metrics(metrics, step, wandb_active=wandb_active)
+
+        # --- Eval + best checkpoint ---
+        if step % eval_every == 0:
+            key, eval_key = jax.random.split(runner_state.key)
+            _states, _acts, success, ep_return = run_eval_episode(
+                runner_state.agent_state, graphdef, env_params, eval_key
+            )
+            print(f"  eval | return {ep_return:.2f} | success {success}")
+
+            if wandb_active:
+                log_metrics(
+                    metrics, step, wandb_active=wandb_active,
+                    extra={"eval/return": ep_return, "eval/success": float(success)},
+                )
+
+            ckpt_manager.maybe_save_best(runner_state.agent_state, ep_return, step)
+
+        # --- Periodic checkpoint ---
+        if step % checkpoint_every == 0:
+            ckpt_manager.save_periodic(runner_state.agent_state, step)
+
+    finish_logging(wandb_active)
     return runner_state, all_metrics
