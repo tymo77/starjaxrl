@@ -82,14 +82,15 @@ def test_reset_time_zero():
 # ---------------------------------------------------------------------------
 
 def test_obs_values_match_state():
+    """Obs is a normalized view of the state (each component ~[-1, 1])."""
     state = _reset()
     obs = get_obs(state)
-    assert float(obs[0]) == pytest.approx(float(state.x))
-    assert float(obs[1]) == pytest.approx(float(state.y))
-    assert float(obs[2]) == pytest.approx(float(state.vx))
-    assert float(obs[3]) == pytest.approx(float(state.vy))
-    assert float(obs[4]) == pytest.approx(float(state.theta))
-    assert float(obs[5]) == pytest.approx(float(state.omega))
+    assert float(obs[0]) == pytest.approx(float(state.x)     / 500.0)
+    assert float(obs[1]) == pytest.approx(float(state.y)     / 3000.0)
+    assert float(obs[2]) == pytest.approx(float(state.vx)    / 100.0)
+    assert float(obs[3]) == pytest.approx(float(state.vy)    / 100.0)
+    assert float(obs[4]) == pytest.approx(float(state.theta) / float(jnp.pi))
+    assert float(obs[5]) == pytest.approx(float(state.omega) / 2.0)
     assert float(obs[6]) == pytest.approx(float(state.mprop))
 
 

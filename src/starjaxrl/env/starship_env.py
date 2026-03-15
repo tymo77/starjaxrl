@@ -118,15 +118,19 @@ def reset(key: jax.Array, params: EnvParams) -> StarshipState:
 
 
 def get_obs(state: StarshipState) -> jax.Array:
-    """Extract the 7-element observation vector from the state."""
+    """Extract and normalize the 7-element observation vector.
+
+    All components are scaled to roughly [-1, 1] so the network
+    sees inputs of comparable magnitude regardless of physical units.
+    """
     return jnp.array([
-        state.x,
-        state.y,
-        state.vx,
-        state.vy,
-        state.theta,
-        state.omega,
-        state.mprop,
+        state.x     / 500.0,   # x:     ±500 m  → ±1
+        state.y     / 3000.0,  # y:     0–3000 m → 0–1
+        state.vx    / 100.0,   # vx:    ±100 m/s → ±1
+        state.vy    / 100.0,   # vy:    ±100 m/s → ±1 (vy0 = -0.8)
+        state.theta / jnp.pi,  # theta: [0, 2π]  → [0, 2]
+        state.omega / 2.0,     # omega: ±2 rad/s → ±1
+        state.mprop,           # mprop: [0, 1] — already normalized
     ])
 
 

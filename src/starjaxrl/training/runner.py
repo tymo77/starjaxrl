@@ -135,11 +135,11 @@ def make_train_step(
         def _flat(x: jax.Array) -> jax.Array:
             return x.reshape((-1,) + x.shape[2:])
 
-        flat_obs      = _flat(traj.obs)        # (B, obs_dim)
-        flat_actions  = _flat(traj.action)     # (B, action_dim)
+        flat_obs       = _flat(traj.obs)        # (B, obs_dim)
+        flat_actions   = _flat(traj.action)    # (B, action_dim)
         flat_log_probs = _flat(traj.log_prob)  # (B,)
-        flat_adv      = advantages.reshape(-1) # (B,)
-        flat_returns  = returns.reshape(-1)    # (B,)
+        flat_adv       = advantages.reshape(-1) # (B,)
+        flat_returns   = returns.reshape(-1)    # (B,)
 
         if normalize_adv:
             flat_adv = (flat_adv - flat_adv.mean()) / (flat_adv.std() + 1e-8)
@@ -184,7 +184,7 @@ def make_train_step(
                     pg2   = -mb_adv * jnp.clip(ratio, 1.0 - clip_eps, 1.0 + clip_eps)
                     pg_loss = jnp.mean(jnp.maximum(pg1, pg2))
 
-                    # Value loss
+                    # Value function loss (MSE)
                     vf_loss = jnp.mean((values - mb_ret) ** 2)
 
                     # Entropy bonus
