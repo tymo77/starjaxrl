@@ -348,11 +348,18 @@ def train(cfg: DictConfig) -> tuple[RunnerState, list[TrainMetrics]]:
 
         # --- Eval + best checkpoint ---
         if step % eval_every == 0:
+            from starjaxrl.utils.visualization import plot_trajectory
             key, eval_key = jax.random.split(runner_state.key)
-            _states, _acts, success, ep_return = run_eval_episode(
+            eval_states, eval_acts, success, ep_return = run_eval_episode(
                 runner_state.agent_state, graphdef, env_params, eval_key
             )
-            print(f"  eval | return {ep_return:.2f} | success {success}")
+            print(f"  eval | return {ep_return:.2f} | success {success} | steps {len(eval_states)-1}")
+            plot_trajectory(
+                eval_states, eval_acts,
+                path=Path("renders") / f"eval_{step:04d}.png",
+                env_params=env_params,
+                title=f"eval @ update {step}/{n_updates} | return {ep_return:.1f} | {'SUCCESS' if success else 'crash'}",
+            )
 
             if wandb_active:
                 log_metrics(

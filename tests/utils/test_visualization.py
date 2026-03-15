@@ -12,6 +12,7 @@ from starjaxrl.physics import StarshipState
 from starjaxrl.utils.visualization import (
     _engine_pos,
     _vehicle_corners,
+    plot_trajectory,
     render_frame,
     render_trajectory,
     save_animation,
@@ -198,3 +199,46 @@ def test_save_animation_creates_parent_dir(tmp_path):
     save_animation(anim, out, fps=5)
     assert out.exists()
     plt.close(fig)
+
+
+# ---------------------------------------------------------------------------
+# plot_trajectory — static multi-panel PNG
+# ---------------------------------------------------------------------------
+
+def test_plot_trajectory_creates_file(tmp_path):
+    states, actions = _simple_trajectory(10)
+    out = tmp_path / "traj.png"
+    plot_trajectory(states, actions, out)
+    assert out.exists()
+    assert out.stat().st_size > 0
+
+
+def test_plot_trajectory_with_env_params(tmp_path):
+    """Tolerance reference lines rendered without error."""
+    states, actions = _simple_trajectory(10)
+    out = tmp_path / "traj_params.png"
+    plot_trajectory(states, actions, out, env_params=DEFAULT_ENV_PARAMS)
+    assert out.exists()
+
+
+def test_plot_trajectory_with_title(tmp_path):
+    states, actions = _simple_trajectory(5)
+    out = tmp_path / "traj_titled.png"
+    plot_trajectory(states, actions, out, title="eval @ update 50 | return -200.0 | crash")
+    assert out.exists()
+
+
+def test_plot_trajectory_creates_parent_dir(tmp_path):
+    """plot_trajectory should create nested output directories."""
+    states, actions = _simple_trajectory(5)
+    out = tmp_path / "renders" / "nested" / "eval_0025.png"
+    plot_trajectory(states, actions, out)
+    assert out.exists()
+
+
+def test_plot_trajectory_short_episode(tmp_path):
+    """Handles a 2-state (1-step) episode without error."""
+    states, actions = _simple_trajectory(1)
+    out = tmp_path / "short.png"
+    plot_trajectory(states, actions, out, env_params=DEFAULT_ENV_PARAMS)
+    assert out.exists()

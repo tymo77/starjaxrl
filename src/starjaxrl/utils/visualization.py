@@ -251,6 +251,140 @@ def render_trajectory(
 
 
 # ---------------------------------------------------------------------------
+# Static multi-panel trajectory plot
+# ---------------------------------------------------------------------------
+
+def plot_trajectory(
+    states:     list[StarshipState],
+    actions:    list[np.ndarray],
+    path:       str | Path,
+    env_params: EnvParams | None = None,
+    title:      str | None = None,
+) -> None:
+    """Save a static 6-panel summary plot of a single episode to *path*.
+
+    Panels (2 rows × 3 cols):
+        [0,0] x–y world path     [0,1] altitude vs time   [0,2] vy vs time
+        [1,0] theta vs time      [1,1] throttle vs time   [1,2] fuel vs time
+
+    Reference lines are drawn at success tolerances when env_params is given.
+
+    Args:
+        states:     List of StarshipState (length T+1).
+        actions:    List of actions (length T).
+        path:       Output file path (.png recommended).
+        env_params: Used for tolerance reference lines and catch-arm marker.
+        title:      Optional suptitle (e.g. "eval @ update 250 | return -420").
+    """
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+
+    xs      = np.array([float(s.x)     for s in states])
+    ys      = np.array([float(s.y)     for s in states])
+    vys     = np.array([float(s.vy)    for s in states])
+    thetas  = np.array([float(s.theta) for s in states])
+    mprops  = np.array([float(s.mprop) for s in states])
+    ts      = np.array([float(s.time)  for s in states])
+
+    throttles = np.array([float(a[0]) for a in actions] + [float(actions[-1][0])])
+
+    fig, axes = plt.subplots(2, 3, figsize=(14, 8), facecolor=_BG_COLOR)
+    fig.subplots_adjust(hspace=0.38, wspace=0.32)
+    if title:
+        fig.suptitle(title, color=_TEXT_COLOR, fontsize=10)
+
+    def _style(ax):
+        ax.set_facecolor(_BG_COLOR)
+        ax.tick_params(colors=_TEXT_COLOR, labelsize=7)
+        ax.xaxis.label.set_color(_TEXT_COLOR)
+        ax.yaxis.label.set_color(_TEXT_COLOR)
+        for spine in ax.spines.values():
+            spine.set_color("#333355")
+
+    def _hline(ax, y, color="#888888", label=None):
+        ax.axhline(y, color=color, lw=0.8, ls="--", alpha=0.7, label=label)
+
+    # ---- [0,0] x–y world path ------------------------------------------
+    ax = axes[0, 0]
+    _style(ax)
+    sc = ax.scatter(xs, ys, c=ts, cmap="plasma", s=3, zorder=3)
+    ax.plot(xs, ys, color=_TRAIL_COLOR, lw=0.6, alpha=0.5, zorder=2)
+    if env_params is not None:
+        ax.axhline(float(env_params.y_catch), color=_PAD_COLOR,
+                   lw=1.2, ls="--", alpha=0.8, label=f"y_catch={env_params.y_catch:.0f}m")
+        ax.legend(fontsize=6, facecolor=_BG_COLOR, labelcolor=_TEXT_COLOR,
+                  loc="upper right")
+    ax.set_xlabel("x  (m)", fontsize=8)
+    ax.set_ylabel("altitude  (m)", fontsize=8)
+    ax.set_title("trajectory", color=_TEXT_COLOR, fontsize=8)
+    cb = fig.colorbar(sc, ax=ax, pad=0.02)
+    cb.ax.tick_params(colors=_TEXT_COLOR, labelsize=6)
+    cb.set_label("time (s)", color=_TEXT_COLOR, fontsize=6)
+
+    # ---- [0,1] altitude vs time ----------------------------------------
+    ax = axes[0, 1]
+    _style(ax)
+    ax.plot(ts, ys, color=_TRAIL_COLOR, lw=1.2)
+    if env_params is not None:
+        _hline(ax, float(env_params.y_catch), _PAD_COLOR)
+    ax.set_xlabel("time  (s)", fontsize=8)
+    ax.set_ylabel("altitude  (m)", fontsize=8)
+    ax.set_title("altitude", color=_TEXT_COLOR, fontsize=8)
+
+    # ---- [0,2] vy vs time ----------------------------------------------
+    ax = axes[0, 2]
+    _style(ax)
+    ax.plot(ts, vys, color="#ff6644", lw=1.2)
+    ax.axhline(0, color="#555577", lw=0.6)
+    if env_params is not None:
+        _hline(ax,  float(env_params.success_vy_tol), "#44ff88", "±vy_tol")
+        _hline(ax, -float(env_params.success_vy_tol), "#44ff88")
+        ax.legend(fontsize=6, facecolor=_BG_COLOR, labelcolor=_TEXT_COLOR)
+    ax.set_xlabel("time  (s)", fontsize=8)
+    ax.set_ylabel("vy  (m/s)", fontsize=8)
+    ax.set_title("descent rate", color=_TEXT_COLOR, fontsize=8)
+
+    # ---- [1,0] theta vs time -------------------------------------------
+    ax = axes[1, 0]
+    _style(ax)
+    ax.plot(ts, np.degrees(thetas), color="#cc88ff", lw=1.2)
+    if env_params is not None:
+        tol_deg = np.degrees(float(env_params.success_theta_tol))
+        _hline(ax,  tol_deg, "#44ff88", f"±{tol_deg:.1f}°")
+        _hline(ax, -tol_deg, "#44ff88")
+        ax.legend(fontsize=6, facecolor=_BG_COLOR, labelcolor=_TEXT_COLOR)
+    ax.axhline(0, color="#555577", lw=0.6)
+    ax.set_xlabel("time  (s)", fontsize=8)
+    ax.set_ylabel("θ  (deg)", fontsize=8)
+    ax.set_title("attitude", color=_TEXT_COLOR, fontsize=8)
+
+    # ---- [1,1] throttle vs time ----------------------------------------
+    ax = axes[1, 1]
+    _style(ax)
+    ax.plot(ts, throttles, color=_PLUME_COLOR, lw=1.2)
+    if env_params is not None:
+        _hline(ax, float(env_params.T_min), "#ffdd55", f"T_min={env_params.T_min:.2f}")
+        ax.legend(fontsize=6, facecolor=_BG_COLOR, labelcolor=_TEXT_COLOR)
+    ax.set_ylim(-0.05, 1.05)
+    ax.set_xlabel("time  (s)", fontsize=8)
+    ax.set_ylabel("throttle", fontsize=8)
+    ax.set_title("throttle command", color=_TEXT_COLOR, fontsize=8)
+
+    # ---- [1,2] fuel remaining vs time ----------------------------------
+    ax = axes[1, 2]
+    _style(ax)
+    ax.plot(ts, mprops * 100, color="#44ccff", lw=1.2)
+    ax.set_ylim(-2, 102)
+    ax.set_xlabel("time  (s)", fontsize=8)
+    ax.set_ylabel("propellant  (%)", fontsize=8)
+    ax.set_title("fuel remaining", color=_TEXT_COLOR, fontsize=8)
+
+    fig.savefig(path, dpi=120, bbox_inches="tight", facecolor=_BG_COLOR)
+    plt.close(fig)
+    print(f"Trajectory plot saved → {path}")
+
+
+# ---------------------------------------------------------------------------
 # Export
 # ---------------------------------------------------------------------------
 
