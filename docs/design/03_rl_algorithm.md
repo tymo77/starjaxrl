@@ -1,87 +1,82 @@
 # 03 — RL Algorithm
 
-## Algorithm Choice
+## Algorithm
 
-| Algorithm | Type | Pros | Cons |
-|-----------|------|------|------|
-| **PPO** | On-policy, actor-critic | Stable, well-understood, good for continuous control | Sample-inefficient |
-| **SAC** | Off-policy, actor-critic | Sample-efficient, handles continuous actions well | More complex, replay buffer memory |
-| **TD3** | Off-policy | Stable, less hyperparameter-sensitive than SAC | Similar complexity to SAC |
-| **DDPG** | Off-policy | Simple baseline | Less stable than TD3/SAC |
+**Decision: PPO (Proximal Policy Optimization).**
 
-> **Proposed: PPO** — it's the de-facto standard for continuous control demos,
-> stable to train, and maps cleanly onto a JAX `vmap` + `jit` training loop.
-> Pure-JAX PPO (à la CleanRL or PureJaxRL style) is an excellent fit.
+On-policy, actor-critic, well-suited for continuous control. Maps cleanly onto
+a JAX `vmap` + `lax.scan` training loop. SAC is in the TODO list as a future
+alternative.
 
 ---
 
-## PPO Specifics
+## PPO Loss
 
-### Clipped Objective
 ```
 L_CLIP = E[min(r_t * A_t, clip(r_t, 1-ε, 1+ε) * A_t)]
-```
+L_VF   = E[(V(s) - V_target)²]
+L_ENT  = H[π]
 
-### Value Loss
-```
-L_VF = E[(V(s) - V_target)²]
-```
-
-### Entropy Bonus
-```
-L_ENT = -β * H[π]
-```
-
-### Combined Loss
-```
 L = -L_CLIP + c1 * L_VF - c2 * L_ENT
 ```
 
-### Key Hyperparameters (starting point)
+---
 
-| Param | Value | Notes |
-|-------|-------|-------|
+## Hyperparameters (starting point — all in Hydra config)
+
+| Parameter | Value | Notes |
+|-----------|-------|-------|
 | γ (discount) | 0.99 | |
 | λ (GAE lambda) | 0.95 | |
 | ε (clip ratio) | 0.2 | |
 | Learning rate | 3e-4 | Adam |
-| Epochs per update | 10 | Minibatch passes over collected data |
+| LR annealing | linear to 0 | Configurable on/off |
+| Gradient clip norm | 0.5 | |
+| Epochs per update | 10 | Minibatch passes per rollout |
 | Minibatch size | 64 | |
-| Rollout length | 128 | Steps per env before update |
-| Num envs (vmap) | 64–256 | Parallel environments |
+| Rollout length | 128 | Steps per env per update |
+| Num parallel envs | 16 | Small to start; increase for GPU |
 | Entropy coeff c2 | 0.01 | |
 | Value coeff c1 | 0.5 | |
+| Normalize advantages | True | |
 
-**Open questions:**
-- Linear LR annealing over training? (Common in PPO, often helps)
-- Gradient clipping (max norm)? (Typically 0.5)
-- Normalize advantages? (Yes, almost always)
-- Normalize observations? Running mean/std? (Recommended)
+All values are Hydra config parameters.
 
 ---
 
 ## Training Loop Style
 
-**Decision: PureJaxRL style vs. standard Python loop**
-
-| Style | Description | Pros | Cons |
-|-------|-------------|------|------|
-| **PureJaxRL** | Entire rollout + update compiled with `jit`, `vmap`, `lax.scan` | Extremely fast, no Python overhead | Harder to debug, less flexible |
-| **Python loop + JAX steps** | Python controls episodes, JAX computes steps/updates | Easier to debug, flexible logging | Slower (Python overhead per step) |
-
-> **Proposed: PureJaxRL style** — the whole point of JAX is speed. Use `lax.scan`
-> over timesteps, `vmap` over environments, and `jit` the entire update.
-> This lets us train thousands of episodes in seconds on CPU/GPU/TPU.
-
-### Rough Training Loop Structure
+**Decision: PureJaxRL style** — entire rollout collection and parameter update
+compiled with `jit`, `vmap` over environments, `lax.scan` over timesteps.
 
 ```python
 @jax.jit
-def train_step(runner_state):
-    # 1. Collect rollout with lax.scan over T timesteps, N envs via vmap
+def train_step(runner_state, _):
+    # 1. Collect rollout: lax.scan over T steps, N envs via vmap
     # 2. Compute GAE advantages
-    # 3. Update actor/critic for K epochs with minibatching
+    # 3. PPO update: K epochs, minibatched
     return runner_state, metrics
 
 runner_state, metrics = jax.lax.scan(train_step, init_runner_state, None, n_updates)
 ```
+
+`runner_state` carries: env states, policy/value params, optimizer states, PRNG key.
+
+---
+
+## Configuration
+
+**Decision: Hydra** for config management.
+
+- All hyperparameters (physics, reward weights, PPO, network) in structured configs
+- Override from CLI: `python train.py ppo.lr=1e-3 env.y_start=2000`
+- Config groups for experiment sweeps
+
+---
+
+## Deferred
+
+See [06_todos.md](06_todos.md):
+- SAC implementation
+- Reward curriculum (phase out dense shaping)
+- Hyperparameter sweeps / tuning

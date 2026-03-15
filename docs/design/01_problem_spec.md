@@ -2,20 +2,13 @@
 
 ## Dimensionality
 
-**Decision: 2D or 3D?**
-
-| Option | Pros | Cons |
-|--------|------|------|
-| **2D planar** | Simple, fast to train, easy to visualize, good for demonstration | Ignores roll/yaw, lateral drift in one axis only |
-| **3D** | Realistic, richer dynamics | Much harder to train, harder to visualize, overkill for a demo |
-
-> **Proposed:** 2D planar (x, y position; theta orientation). Extend to 3D later if desired.
+**Decision: 2D planar.** x/y position, θ pitch. Extend to 3D is in the TODO list.
 
 ---
 
 ## State Space
 
-Proposed continuous state vector:
+Continuous state vector (7 elements, no normalization initially):
 
 | Variable | Symbol | Units | Notes |
 |----------|--------|-------|-------|
@@ -25,81 +18,93 @@ Proposed continuous state vector:
 | Vertical velocity | vy | m/s | Negative = falling |
 | Pitch angle | θ | rad | 0 = vertical/nose-up, π/2 = horizontal |
 | Angular velocity | ω | rad/s | |
-| Remaining propellant mass | m_prop | kg | Normalized to [0, 1]? |
+| Remaining propellant fraction | m_prop | [0, 1] | Normalized mass fraction |
 
-**Open questions:**
-- Do we include propellant mass in the state, or treat fuel as unlimited?
-- Do we normalize the state vector? If so, how?
-- Do we add sensor noise to make it more realistic?
+Propellant mass is included — it drives the mass change throughout the burn (Tsiolkovsky).
+Observation noise and domain randomization are deferred to the TODO list.
 
 ---
 
 ## Action Space
 
-**Decision: Continuous or Discrete?**
-
-| Option | Pros | Cons |
-|--------|------|------|
-| **Continuous** | Realistic, smooth control | Harder to train, requires actor-critic |
-| **Discrete** | Simpler, faster to train | Unrealistic quantized thrust |
-
-> **Proposed:** Continuous 2D action space.
+**Decision: Continuous, 2D.**
 
 | Action | Symbol | Range | Notes |
 |--------|--------|-------|-------|
-| Throttle | T | [0, 1] | Fraction of max thrust |
-| Gimbal angle | δ | [-δ_max, δ_max] | Thrust vector angle relative to vehicle axis |
+| Throttle | T | [T_min, 1] | Fraction of max thrust; T_min in config (Raptors can't throttle to zero) |
+| Gimbal angle | δ | [-δ_max, δ_max] | Thrust vector angle relative to vehicle axis; δ_max in config |
 
-**Open questions:**
-- Should we allow throttle = 0 (engine off)? Or minimum throttle floor (real Raptors have a min throttle)?
-- Max gimbal angle — real Raptor is ~±20°. Use that?
-- Do we model grid fins as a separate control or fold into gimbal?
+All action limits are configuration parameters. Engine shutdown (throttle below T_min)
+and aerodynamic control surfaces (flaps) are deferred to the TODO list.
 
 ---
 
 ## Initial Conditions
 
-The episode starts with Starship in free-fall, belly-down (θ ≈ π/2), at some altitude.
+Episode starts with Starship in free-fall, belly-down:
 
-**Open questions:**
-- Fixed initial state (easier to learn, less robust) or randomized (harder, more general)?
-- Suggested starting point: y ≈ 500–2000 m, vy ≈ -80 m/s, θ ≈ π/2, vx ≈ 0
+| Variable | Value | Notes |
+|----------|-------|-------|
+| x | 0 m | Centered on pad |
+| y | 3000 m | Starting altitude |
+| vx | 0 m/s | No lateral drift initially |
+| vy | -80 m/s | Approximate terminal velocity belly-down |
+| θ | π/2 rad | Horizontal / belly-down |
+| ω | 0 rad/s | |
+| m_prop | 1.0 | Full propellant |
+
+Initial condition randomization is deferred to the TODO list.
 
 ---
 
 ## Termination Conditions
 
-| Condition | Terminal? | Notes |
+| Condition | Result | Notes |
+|-----------|--------|-------|
+| y ≤ y_catch | Terminal | Success if within tolerances, else crash |
+| \|x\| > x_max | Crash | Out of bounds |
+| m_prop ≤ 0 | Crash | Out of fuel |
+| t > t_max | Crash | Timeout |
+| \|θ\| > θ_max (e.g. 3π/2) | Crash | Tumbling / uncontrolled rotation |
+
+`y_catch`, `x_max`, `t_max`, `θ_max` are all configuration parameters.
+Landing is on the catch arms — we target a specific height, not y = 0.
+
+---
+
+## Success Criteria
+
+Landing is successful if all of the following hold at termination (y ≤ y_catch):
+
+| Condition | Tolerance | Notes |
 |-----------|-----------|-------|
-| y ≤ 0 (ground contact) | Yes | Success or crash depending on velocity/angle |
-| \|x\| > x_max (out of bounds) | Yes | Failure |
-| θ out of range | Yes? | Tumbling — failure |
-| t > t_max | Yes | Timeout — failure |
-| m_prop ≤ 0 | Yes | Out of fuel — failure (if modeled) |
+| Horizontal offset | \|x\| ≤ 1 m | Catch arm width |
+| Vertical velocity | \|vy\| ≤ 2 m/s | Soft catch |
+| Horizontal velocity | \|vx\| ≤ 1 m/s | |
+| Pitch angle | \|θ\| ≤ 10° | Near-vertical |
+
+Tolerances are configuration parameters.
 
 ---
 
 ## Reward Function
 
-**This is the most important design decision.**
-
-A sparse reward (only on landing) is realistic but very hard to learn. A shaped
-reward guides learning but can cause unintended behavior.
-
-**Proposed: Dense shaping + terminal bonus**
+**Decision: Dense shaping now, sparse success bonus as primary signal.**
 
 ```
-r(t) = - w1 * |x|           # penalize horizontal offset
-       - w2 * |vy|           # penalize vertical speed
-       - w3 * |vx|           # penalize horizontal speed
-       - w4 * |θ|            # penalize deviation from vertical
-       - w5 * |T|            # penalize fuel use (optional)
-       + R_success           # large bonus on successful landing
-       - R_crash             # large penalty on crash
+r(t) = - w_x  * |x|        # penalize horizontal offset
+       - w_vy * |vy|        # penalize vertical speed
+       - w_vx * |vx|        # penalize horizontal speed
+       - w_θ  * |θ|         # penalize deviation from vertical
+
+On success (terminal, within tolerances):
+       + R_success           # large sparse bonus
+
+On crash (terminal, outside tolerances):
+       (no extra penalty — absence of R_success is sufficient signal)
 ```
 
-**Open questions:**
-- What weights? (These will need tuning.)
-- Define "successful landing": e.g., |vy| < 2 m/s, |vx| < 1 m/s, |θ| < 10°, |x| < 5 m
-- Should we penalize fuel use? (Encourages efficiency but complicates learning.)
-- Potential-based shaping to guarantee policy invariance?
+- Weights `w_x`, `w_vy`, `w_vx`, `w_θ`, and `R_success` are configuration parameters.
+- Dense shaping is kept initially to guide early learning.
+- Curriculum to phase out dense terms and move toward pure sparse reward is in the TODO list.
+- Fuel penalty is deferred — fuel use is implicitly penalized by limiting propellant.

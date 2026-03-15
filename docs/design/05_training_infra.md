@@ -2,84 +2,76 @@
 
 ## Vectorized Environments
 
-JAX's `vmap` lets us run N environments in parallel with zero overhead —
-the physics step and environment reset are batched across all envs simultaneously.
+**Decision: `vmap` over N parallel environments, small N to start (16).**
 
 ```python
-# Vectorized step: runs N envs in one XLA kernel
 batch_step = jax.vmap(env.step, in_axes=(0, 0))
 ```
 
-**Open questions:**
-- How many parallel envs? 64–256 is typical for PPO on CPU. More on GPU.
-- Do we want a curriculum (start easy, increase difficulty)?
+Increase N when moving to GPU. Curriculum over environment difficulty is in the TODO list.
 
 ---
 
 ## Experiment Logging
 
-| Option | Pros | Cons |
-|--------|------|------|
-| **Weights & Biases (wandb)** | Rich UI, easy comparison, free tier | External dependency, requires account |
-| **TensorBoard** | Local, no account needed | Less polished UI |
-| **CSV + matplotlib** | Minimal, no setup | Manual plotting |
+**Decision: Weights & Biases (wandb).**
 
-> **Proposed: wandb** for a demo project — the visualizations are compelling and
-> shareable. Easy to add with a single `wandb.log()` call.
-
-**Open question:** Do you have a wandb account / preference here?
+- Free account, rich UI, easy to share run comparisons
+- Log: episodic return, success rate, value loss, policy loss, entropy, LR
+- Log trajectory animations periodically (eval rollouts rendered to gif)
 
 ---
 
 ## Checkpointing
 
-Use **Orbax** (already installed as a Flax dependency) to save/restore training state.
+**Decision: Orbax** (ships with Flax).
+
+- Save checkpoint every N updates
+- Keep best checkpoint by mean episodic return
+- Save full runner state: network params, optimizer state, step count
 
 ```python
-# Save
 checkpointer = orbax.checkpoint.PyTreeCheckpointer()
-checkpointer.save(path, runner_state)
-
-# Restore
-runner_state = checkpointer.restore(path)
+checkpointer.save(path, nnx.state(runner_state))
 ```
-
-Save checkpoints every N updates and keep the best by mean episode return.
 
 ---
 
-## Hardware Target
+## Hardware
 
-| Target | Notes |
-|--------|-------|
-| **CPU (M-series Mac)** | Works out of the box, JAX metal plugin for GPU accel |
-| **CUDA GPU** | `pip install jax[cuda]`, fastest for large batch training |
-| **TPU** | Overkill for this project |
+**Decision: Apple Silicon Mac (CPU/Metal).**
 
-> **Proposed:** Write hardware-agnostic code (JAX handles this automatically).
-> Optionally add `jax[metal]` for Apple Silicon GPU acceleration.
-
-**Open question:** Are you training on your Mac or a cloud GPU?
+Code is hardware-agnostic — JAX selects the backend automatically.
+`jax[metal]` plugin for Apple GPU acceleration is optional but recommended.
 
 ---
 
 ## Evaluation & Rendering
 
-Separate from training — run a greedy (deterministic) policy, record trajectory,
-render with Matplotlib animation.
+Separate from training. Run the greedy (deterministic) policy for one episode,
+record the trajectory, animate with Matplotlib.
 
-- `matplotlib.animation.FuncAnimation` for trajectory playback
-- Save as `.gif` or `.mp4` for sharing
-- Render: vehicle as a rectangle, thrust vector as an arrow, trajectory as a line
+- Vehicle: rectangle rotated to θ
+- Thrust vector: arrow from engine nozzle
+- Trajectory: fading line of (x, y) history
+- HUD: altitude, speed, fuel remaining
+- Export: `.gif` for sharing, `.mp4` for quality
 
 ---
 
-## Project Milestones
+## Testing
 
-| Milestone | Description |
-|-----------|-------------|
-| M1 | Physics simulator passes sanity checks (free-fall, hover) |
-| M2 | Environment step/reset works, basic reward fires |
-| M3 | PPO training loop runs, reward increases over time |
-| M4 | Successful landings demonstrated, animation rendered |
-| M5 | Ablations, reward shaping experiments, writeup |
+**Decision: pytest.**
+
+Tests live in `tests/` mirroring `src/starjaxrl/`. Every module gets a
+test file written alongside the implementation. Key test categories:
+
+| Category | What we test |
+|----------|-------------|
+| Physics | Free-fall trajectory, hover equilibrium, mass depletion, angular dynamics |
+| Environment | Step/reset shapes, termination conditions, reward bounds |
+| Agent | Network forward pass shapes, action distribution validity |
+| Training | Loss decreases over a few updates, no NaN/Inf in gradients |
+| Integration | Full training run for N steps without crash |
+
+Run with: `uv run pytest tests/ -v`
