@@ -261,11 +261,12 @@ def plot_trajectory(
     env_params: EnvParams | None = None,
     title:      str | None = None,
 ) -> None:
-    """Save a static 6-panel summary plot of a single episode to *path*.
+    """Save a static 9-panel summary plot of a single episode to *path*.
 
-    Panels (2 rows × 3 cols):
+    Panels (3 rows × 3 cols):
         [0,0] x–y world path     [0,1] altitude vs time   [0,2] vy vs time
         [1,0] theta vs time      [1,1] throttle vs time   [1,2] fuel vs time
+        [2,0] vx vs time         [2,1] gimbal vs time     [2,2] total speed vs time
 
     Reference lines are drawn at success tolerances when env_params is given.
 
@@ -281,15 +282,19 @@ def plot_trajectory(
 
     xs      = np.array([float(s.x)     for s in states])
     ys      = np.array([float(s.y)     for s in states])
+    vxs     = np.array([float(s.vx)    for s in states])
     vys     = np.array([float(s.vy)    for s in states])
     thetas  = np.array([float(s.theta) for s in states])
     mprops  = np.array([float(s.mprop) for s in states])
     ts      = np.array([float(s.time)  for s in states])
+    speeds  = np.sqrt(vxs ** 2 + vys ** 2)
 
+    # Extend action arrays by one to align with state length (repeat last action)
     throttles = np.array([float(a[0]) for a in actions] + [float(actions[-1][0])])
+    gimbals   = np.degrees(np.array([float(a[1]) for a in actions] + [float(actions[-1][1])]))
 
-    fig, axes = plt.subplots(2, 3, figsize=(14, 8), facecolor=_BG_COLOR)
-    fig.subplots_adjust(hspace=0.38, wspace=0.32)
+    fig, axes = plt.subplots(3, 3, figsize=(14, 11), facecolor=_BG_COLOR)
+    fig.subplots_adjust(hspace=0.42, wspace=0.32)
     if title:
         fig.suptitle(title, color=_TEXT_COLOR, fontsize=10)
 
@@ -378,6 +383,41 @@ def plot_trajectory(
     ax.set_xlabel("time  (s)", fontsize=8)
     ax.set_ylabel("propellant  (%)", fontsize=8)
     ax.set_title("fuel remaining", color=_TEXT_COLOR, fontsize=8)
+
+    # ---- [2,0] vx vs time ----------------------------------------------
+    ax = axes[2, 0]
+    _style(ax)
+    ax.plot(ts, vxs, color="#ffaa44", lw=1.2)
+    ax.axhline(0, color="#555577", lw=0.6)
+    if env_params is not None:
+        _hline(ax,  float(env_params.success_vx_tol), "#44ff88", "±vx_tol")
+        _hline(ax, -float(env_params.success_vx_tol), "#44ff88")
+        ax.legend(fontsize=6, facecolor=_BG_COLOR, labelcolor=_TEXT_COLOR)
+    ax.set_xlabel("time  (s)", fontsize=8)
+    ax.set_ylabel("vx  (m/s)", fontsize=8)
+    ax.set_title("lateral velocity", color=_TEXT_COLOR, fontsize=8)
+
+    # ---- [2,1] gimbal vs time ------------------------------------------
+    ax = axes[2, 1]
+    _style(ax)
+    ax.plot(ts, gimbals, color="#ff88cc", lw=1.2)
+    ax.axhline(0, color="#555577", lw=0.6)
+    if env_params is not None:
+        lim_deg = np.degrees(float(env_params.delta_max))
+        _hline(ax,  lim_deg, "#ff4444", f"±{lim_deg:.1f}°")
+        _hline(ax, -lim_deg, "#ff4444")
+        ax.legend(fontsize=6, facecolor=_BG_COLOR, labelcolor=_TEXT_COLOR)
+    ax.set_xlabel("time  (s)", fontsize=8)
+    ax.set_ylabel("gimbal  (deg)", fontsize=8)
+    ax.set_title("gimbal angle", color=_TEXT_COLOR, fontsize=8)
+
+    # ---- [2,2] total speed vs time -------------------------------------
+    ax = axes[2, 2]
+    _style(ax)
+    ax.plot(ts, speeds, color="#aaddff", lw=1.2)
+    ax.set_xlabel("time  (s)", fontsize=8)
+    ax.set_ylabel("speed  (m/s)", fontsize=8)
+    ax.set_title("total speed", color=_TEXT_COLOR, fontsize=8)
 
     fig.savefig(path, dpi=120, bbox_inches="tight", facecolor=_BG_COLOR)
     plt.close(fig)
