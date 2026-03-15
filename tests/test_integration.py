@@ -19,9 +19,9 @@ from starjaxrl.training.runner import init_runner, make_train_step
 @pytest.fixture(scope="module")
 def mini_cfg():
     """Full merged config with reduced scale for fast integration tests."""
-    env     = OmegaConf.load("configs/env.yaml")
-    ppo     = OmegaConf.load("configs/ppo.yaml")
-    network = OmegaConf.load("configs/network.yaml")
+    env     = OmegaConf.load("configs/env/env.yaml")
+    ppo     = OmegaConf.load("configs/ppo/ppo.yaml")
+    network = OmegaConf.load("configs/network/network.yaml")
     base    = OmegaConf.load("configs/train.yaml")
     cfg = OmegaConf.merge(
         OmegaConf.create({"env": env, "ppo": ppo, "network": network}),
