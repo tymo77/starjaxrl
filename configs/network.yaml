@@ -1,0 +1,6 @@
+# Neural network architecture configuration
+
+hidden_dim: 64           # units per hidden layer
+n_hidden: 2              # number of hidden layers
+activation: tanh         # tanh | relu
+orthogonal_init: true    # use orthogonal initialization (recommended for PPO)

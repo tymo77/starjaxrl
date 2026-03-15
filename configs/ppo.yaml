@@ -1,0 +1,15 @@
+# PPO hyperparameters
+
+gamma: 0.99              # discount factor
+gae_lambda: 0.95         # GAE lambda
+clip_eps: 0.2            # PPO clip ratio
+lr: 3.0e-4               # Adam learning rate
+lr_anneal: true          # linearly anneal LR to 0 over training
+grad_clip: 0.5           # max gradient norm
+n_epochs: 10             # update epochs per rollout
+minibatch_size: 64       # minibatch size for PPO update
+rollout_len: 128         # steps collected per env per update
+n_envs: 16               # number of parallel environments
+entropy_coeff: 0.01      # entropy bonus coefficient
+value_coeff: 0.5         # value loss coefficient
+normalize_advantages: true

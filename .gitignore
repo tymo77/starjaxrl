@@ -8,3 +8,22 @@ wheels/
 
 # Virtual environments
 .venv
+
+# Hydra outputs
+outputs/
+multirun/
+
+# Wandb
+wandb/
+
+# Checkpoints
+checkpoints/
+
+# Pytest
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Animations / renders
+*.gif
+*.mp4
