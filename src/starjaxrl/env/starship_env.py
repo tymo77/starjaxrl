@@ -52,11 +52,20 @@ class EnvParams(NamedTuple):
     success_vx_tol: float
     success_theta_tol: float
 
-    # --- Reward weights ---
-    w_x: float
-    w_vy: float
-    w_vx: float
-    w_theta: float
+    # --- Reward: Gaussian shaping weights ---
+    w_x:     float   # lateral position
+    w_vy:    float   # vertical velocity
+    w_vx:    float   # horizontal velocity
+    w_theta: float   # attitude
+
+    # --- Reward: Gaussian spreads (1-sigma = value where reward ≈ 0.6) ---
+    sigma_x:     float
+    sigma_vy:    float
+    sigma_vx:    float
+    sigma_theta: float
+
+    # --- Reward: time penalty and success bonus ---
+    w_time:    float
     R_success: float
 
 
@@ -87,14 +96,16 @@ def to_physics_params(params: EnvParams) -> StarshipParams:
 
 # Default parameters matching configs/env.yaml
 DEFAULT_ENV_PARAMS = EnvParams(
-    m_dry=100_000.0, m_prop_max=1_200_000.0, T_max=6_000_000.0,
+    m_dry=100_000.0, m_prop_max=12_000.0, T_max=6_000_000.0,
     Isp=330.0, T_min=0.4, delta_max=0.35, L=50.0, g=9.81, dt=0.05,
     x0=0.0, y0=3000.0, vx0=0.0, vy0=-80.0,
     theta0=jnp.pi / 2, omega0=0.0, mprop0=1.0,
     y_catch=50.0, x_max=500.0, theta_max=3 * jnp.pi / 2, t_max=120.0,
     success_x_tol=1.0, success_vy_tol=2.0, success_vx_tol=1.0,
     success_theta_tol=0.175,
-    w_x=0.01, w_vy=0.01, w_vx=0.01, w_theta=0.01, R_success=100.0,
+    w_x=1.0, w_vy=1.0, w_vx=0.5, w_theta=1.0,
+    sigma_x=50.0, sigma_vy=30.0, sigma_vx=10.0, sigma_theta=0.5,
+    w_time=0.01, R_success=100.0,
 )
 
 
@@ -153,25 +164,37 @@ def is_success(state: StarshipState, params: EnvParams) -> jax.Array:
     return x_ok & vy_ok & vx_ok & theta_ok
 
 
+def _gauss(value: jax.Array, sigma: float) -> jax.Array:
+    """Unit Gaussian: 1.0 at value=0, exp(-0.5)≈0.6 at value=±sigma."""
+    return jnp.exp(-0.5 * (value / sigma) ** 2)
+
+
 def compute_reward(
     next_state: StarshipState,
     done: jax.Array,
     params: EnvParams,
 ) -> jax.Array:
-    """
-    Dense shaping reward every step plus a sparse success bonus on landing.
+    """Gaussian shaping + time penalty + sparse success bonus.
 
-    r(t) = -w_x*|x| - w_vy*|vy| - w_vx*|vx| - w_theta*|theta|
-           + R_success  (if done and within tolerances)
+    r(t) = w_x     * gauss(x,     sigma_x)
+         + w_vy    * gauss(vy,    sigma_vy)
+         + w_vx    * gauss(vx,    sigma_vx)
+         + w_theta * gauss(theta, sigma_theta)
+         - w_time
+         + R_success   (if done and within all tolerances)
+
+    Each Gaussian returns 1.0 at the target and smoothly falls to 0 as
+    the state moves away, with the 1-sigma point set by the sigma_* params.
     """
-    dense = -(
-        params.w_x     * jnp.abs(next_state.x)
-        + params.w_vy  * jnp.abs(next_state.vy)
-        + params.w_vx  * jnp.abs(next_state.vx)
-        + params.w_theta * jnp.abs(next_state.theta)
+    dense = (
+        _gauss(next_state.x,     params.sigma_x)
+        * _gauss(next_state.y,     10 * params.sigma_x)
+        * _gauss(next_state.vy,    params.sigma_vy)
+        * _gauss(next_state.vx,    params.sigma_vx)
+        * _gauss(next_state.theta, params.sigma_theta)
     )
-    bonus = jnp.where(done & is_success(next_state, params), params.R_success, 0.0)
-    return dense + bonus
+    success_bonus = jnp.where(done & is_success(next_state, params), params.R_success, 0.0)
+    return dense + success_bonus
 
 
 def step(

@@ -211,13 +211,15 @@ def test_fail_theta_too_large():
 # Reward
 # ---------------------------------------------------------------------------
 
-def test_reward_negative_for_off_target():
-    """Dense shaping should produce negative reward when not at target."""
-    state = _make_state(x=50.0, vy=-40.0, vx=5.0, theta=1.0)
+def test_reward_higher_at_target():
+    """Reward at the ideal landing state should exceed reward far from target."""
+    from starjaxrl.env.starship_env import compute_reward
     done = jnp.array(False)
-    r = float(step(state, _zero_action(), P)[2])
-    # With large offsets, dense penalty should dominate
-    assert r < 0.0
+    state_good = _make_state(x=0.0, vy=0.0, vx=0.0, theta=0.0)
+    state_bad  = _make_state(x=200.0, vy=-80.0, vx=20.0, theta=1.5)
+    r_good = float(compute_reward(state_good, done, P))
+    r_bad  = float(compute_reward(state_bad,  done, P))
+    assert r_good > r_bad
 
 
 def test_reward_includes_success_bonus():
@@ -243,15 +245,26 @@ def test_reward_includes_success_bonus():
     assert jnp.isfinite(jnp.array(total_reward))
 
 
-def test_reward_dense_penalty_components():
-    """Each dense shaping term contributes correctly."""
+def test_reward_gaussian_at_perfect_state():
+    """At x=vy=vx=theta=0 all Gaussian terms are 1.0; reward = sum(weights) - w_time."""
     from starjaxrl.env.starship_env import compute_reward
 
-    state = _make_state(x=10.0, vy=-5.0, vx=2.0, theta=0.5, y=200.0)
+    state = _make_state(x=0.0, vy=0.0, vx=0.0, theta=0.0)
     done = jnp.array(False)
     r = float(compute_reward(state, done, P))
-    expected = -(P.w_x * 10.0 + P.w_vy * 5.0 + P.w_vx * 2.0 + P.w_theta * 0.5)
+    expected = P.w_x + P.w_vy + P.w_vx + P.w_theta - P.w_time
     assert r == pytest.approx(expected, rel=1e-4)
+
+
+def test_reward_finite_across_states():
+    """Gaussian reward is always finite regardless of state values."""
+    from starjaxrl.env.starship_env import compute_reward
+
+    done = jnp.array(False)
+    for x, vy, theta in [(0, 0, 0), (500, -200, 4.7), (-300, 50, -1.0)]:
+        state = _make_state(x=float(x), vy=float(vy), theta=float(theta))
+        r = compute_reward(state, done, P)
+        assert jnp.isfinite(r), f"Non-finite reward at x={x}, vy={vy}, theta={theta}"
 
 
 # ---------------------------------------------------------------------------

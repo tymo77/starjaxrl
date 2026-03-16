@@ -28,7 +28,9 @@ def test_env_cfg_termination_keys(env_cfg):
 
 
 def test_env_cfg_reward_keys(env_cfg):
-    required = ["w_x", "w_vy", "w_vx", "w_theta", "R_success"]
+    required = ["w_x", "w_vy", "w_vx", "w_theta",
+                "sigma_x", "sigma_vy", "sigma_vx", "sigma_theta",
+                "w_time", "R_success"]
     for key in required:
         assert key in env_cfg, f"Missing reward key: {key}"
 
