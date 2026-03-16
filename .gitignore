@@ -25,5 +25,6 @@ checkpoints/
 htmlcov/
 
 # Animations / renders
+renders/
 *.gif
 *.mp4
