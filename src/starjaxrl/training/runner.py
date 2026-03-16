@@ -45,12 +45,16 @@ class RunnerState(NamedTuple):
 # ---------------------------------------------------------------------------
 
 def make_train_step(
-    graphdef:   Any,
-    optimizer:  optax.GradientTransformation,
-    env_params: EnvParams,
-    cfg:        DictConfig,
+    graphdef:        Any,
+    optimizer:       optax.GradientTransformation,
+    base_env_params: EnvParams,
+    cfg:             DictConfig,
 ) -> Callable[[RunnerState, Any], tuple[RunnerState, TrainMetrics]]:
-    """Return a jit-able train_step function closed over static config."""
+    """Return a jit-able train_step function closed over static config.
+
+    The returned function accepts ``current_g`` as its second argument so
+    that a gravity curriculum can be applied without recompilation.
+    """
 
     n_envs         = int(cfg.ppo.n_envs)
     rollout_len    = int(cfg.ppo.rollout_len)
@@ -66,8 +70,10 @@ def make_train_step(
     normalize_adv  = bool(cfg.ppo.normalize_advantages)
 
     def train_step(
-        runner_state: RunnerState, _: Any
+        runner_state: RunnerState, current_g: jax.Array
     ) -> tuple[RunnerState, TrainMetrics]:
+        # Patch gravity for this update (enables curriculum without recompilation)
+        env_params = base_env_params._replace(g=current_g)
 
         env_states, obs, agent_state, opt_state, key, step = runner_state
 
@@ -314,14 +320,19 @@ def train(cfg: DictConfig) -> tuple[RunnerState, list[TrainMetrics]]:
     )
 
     key               = jax.random.PRNGKey(int(cfg.seed))
-    env_params        = env_params_from_cfg(cfg.env)
+    base_env_params   = env_params_from_cfg(cfg.env)
     n_updates         = int(cfg.n_updates)
     log_every         = int(cfg.log_every)
     checkpoint_every  = int(cfg.checkpoint_every)
     eval_every        = int(cfg.eval_every)
 
+    # Gravity curriculum
+    g_start    = float(cfg.curriculum.g_start)
+    g_end      = float(cfg.env.g)
+    g_updates  = int(cfg.curriculum.g_updates)
+
     runner_state, graphdef, optimizer = init_runner(cfg, key)
-    train_step   = jax.jit(make_train_step(graphdef, optimizer, env_params, cfg))
+    train_step = jax.jit(make_train_step(graphdef, optimizer, base_env_params, cfg))
 
     wandb_active = init_logging(cfg)
     ckpt_manager = CheckpointManager(Path("checkpoints"))
@@ -329,13 +340,17 @@ def train(cfg: DictConfig) -> tuple[RunnerState, list[TrainMetrics]]:
     all_metrics: list[TrainMetrics] = []
 
     for update in range(n_updates):
-        runner_state, metrics = train_step(runner_state, None)
+        frac      = min(1.0, update / max(1, g_updates))
+        current_g = jnp.array(g_start + frac * (g_end - g_start), dtype=jnp.float32)
+
+        runner_state, metrics = train_step(runner_state, current_g)
         all_metrics.append(metrics)
         step = update + 1
 
         if step % log_every == 0:
             print(
                 f"update {step:4d}/{n_updates} | "
+                f"g={float(current_g):.2f} | "
                 f"reward {float(metrics.mean_reward):+.3f} | "
                 f"pg {float(metrics.pg_loss):.4f} | "
                 f"vf {float(metrics.vf_loss):.4f} | "
@@ -349,22 +364,26 @@ def train(cfg: DictConfig) -> tuple[RunnerState, list[TrainMetrics]]:
         # --- Eval + best checkpoint ---
         if step % eval_every == 0:
             from starjaxrl.utils.visualization import plot_trajectory
+            current_env_params = base_env_params._replace(g=float(current_g))
             key, eval_key = jax.random.split(runner_state.key)
             eval_states, eval_acts, success, ep_return = run_eval_episode(
-                runner_state.agent_state, graphdef, env_params, eval_key
+                runner_state.agent_state, graphdef, current_env_params, eval_key
             )
-            print(f"  eval | return {ep_return:.2f} | success {success} | steps {len(eval_states)-1}")
+            print(f"  eval | g={float(current_g):.2f} | return {ep_return:.2f} | "
+                  f"{'SUCCESS' if success else 'crash'} | steps {len(eval_states)-1}")
             plot_trajectory(
                 eval_states, eval_acts,
                 path=Path("renders") / f"eval_{step:04d}.png",
-                env_params=env_params,
-                title=f"eval @ update {step}/{n_updates} | return {ep_return:.1f} | {'SUCCESS' if success else 'crash'}",
+                env_params=current_env_params,
+                title=(f"eval @ update {step}/{n_updates} | g={float(current_g):.2f} m/s² | "
+                       f"return {ep_return:.1f} | {'SUCCESS' if success else 'crash'}"),
             )
 
             if wandb_active:
                 log_metrics(
                     metrics, step, wandb_active=wandb_active,
-                    extra={"eval/return": ep_return, "eval/success": float(success)},
+                    extra={"eval/return": ep_return, "eval/success": float(success),
+                           "curriculum/g": float(current_g)},
                 )
 
             ckpt_manager.maybe_save_best(runner_state.agent_state, ep_return, step)

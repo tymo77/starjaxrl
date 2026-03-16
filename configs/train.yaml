@@ -11,6 +11,11 @@ checkpoint_every: 50     # save checkpoint every N updates
 eval_every: 25           # run eval rollout every N updates
 log_every: 10            # log metrics every N updates
 
+# Gravity curriculum: linearly ramp g from g_start → env.g over g_updates steps
+curriculum:
+  g_start: 2.0           # m/s^2 starting gravity (~0.2g); makes T/W > 1 early
+  g_updates: 8000         # reach full gravity after this many updates
+
 wandb:
   project: starjaxrl
   entity: null           # set to your wandb username or leave null

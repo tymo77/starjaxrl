@@ -106,11 +106,12 @@ def test_init_runner_agent_state_finite(train_cfg):
 
 @pytest.fixture(scope="module")
 def runner_and_step(train_cfg):
-    """Initialise and run one train_step."""
+    """Initialise and run one train_step at full Earth gravity."""
     env_params = env_params_from_cfg(train_cfg.env)
     runner_state, graphdef, optimizer = init_runner(train_cfg, KEY)
     train_step = jax.jit(make_train_step(graphdef, optimizer, env_params, train_cfg))
-    new_runner, metrics = train_step(runner_state, None)
+    current_g = jnp.array(float(train_cfg.env.g), dtype=jnp.float32)
+    new_runner, metrics = train_step(runner_state, current_g)
     return runner_state, new_runner, metrics
 
 
@@ -164,8 +165,9 @@ def test_multiple_train_steps_stable(train_cfg):
     env_params = env_params_from_cfg(train_cfg.env)
     runner_state, graphdef, optimizer = init_runner(train_cfg, KEY)
     train_step = jax.jit(make_train_step(graphdef, optimizer, env_params, train_cfg))
+    current_g = jnp.array(float(train_cfg.env.g), dtype=jnp.float32)
 
     for _ in range(5):
-        runner_state, metrics = train_step(runner_state, None)
+        runner_state, metrics = train_step(runner_state, current_g)
         for field in metrics:
             assert jnp.isfinite(field), "Divergence detected during multi-step test"
