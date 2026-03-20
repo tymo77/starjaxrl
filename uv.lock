@@ -1457,7 +1457,7 @@ wheels = [
 [[package]]
 name = "starjaxrl"
 version = "0.1.0"
-source = { virtual = "." }
+source = { editable = "." }
 dependencies = [
     { name = "flax" },
     { name = "gymnasium" },
