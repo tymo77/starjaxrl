@@ -8,7 +8,6 @@ from flax import nnx
 from omegaconf import DictConfig
 
 from starjaxrl.agents.networks import Actor, Critic, gaussian_entropy, gaussian_log_prob
-from starjaxrl.env.starship_env import StarshipEnv
 
 
 # ---------------------------------------------------------------------------
@@ -132,12 +131,19 @@ class PPOAgent(nnx.Module):
         return log_prob, entropy, value
 
 
-def agent_from_cfg(cfg: DictConfig, key: jax.Array) -> PPOAgent:
-    """Construct a PPOAgent from a Hydra train config."""
+def agent_from_cfg(cfg: DictConfig, key: jax.Array, obs_dim: int, action_dim: int) -> PPOAgent:
+    """Construct a PPOAgent from a Hydra train config.
+
+    Args:
+        cfg:        Hydra config containing ``network`` sub-config.
+        key:        PRNG key for parameter initialisation.
+        obs_dim:    Observation dimensionality (env-specific).
+        action_dim: Action dimensionality (env-specific).
+    """
     rngs = nnx.Rngs(params=key)
     return PPOAgent(
-        obs_dim=StarshipEnv.OBS_DIM,
-        action_dim=StarshipEnv.ACTION_DIM,
+        obs_dim=obs_dim,
+        action_dim=action_dim,
         hidden_dim=int(cfg.network.hidden_dim),
         n_hidden=int(cfg.network.n_hidden),
         rngs=rngs,

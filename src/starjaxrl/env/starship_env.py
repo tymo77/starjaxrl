@@ -11,6 +11,8 @@ from starjaxrl.physics.dynamics import (
     StarshipState,
     euler_step,
 )
+from starjaxrl.env.types import StepInfo
+from starjaxrl.env.reward_utils import gauss
 
 
 # ---------------------------------------------------------------------------
@@ -67,11 +69,6 @@ class EnvParams(NamedTuple):
     # --- Reward: time penalty and success bonus ---
     w_time:    float
     R_success: float
-
-
-class StepInfo(NamedTuple):
-    """Fixed-structure info dict (required for lax.scan compatibility)."""
-    success: jax.Array  # bool scalar
 
 
 def env_params_from_cfg(cfg: DictConfig) -> EnvParams:
@@ -164,11 +161,6 @@ def is_success(state: StarshipState, params: EnvParams) -> jax.Array:
     return x_ok & vy_ok & vx_ok & theta_ok
 
 
-def _gauss(value: jax.Array, sigma: float) -> jax.Array:
-    """Unit Gaussian: 1.0 at value=0, exp(-0.5)≈0.6 at value=±sigma."""
-    return jnp.exp(-0.5 * (value / sigma) ** 2)
-
-
 def compute_reward(
     next_state: StarshipState,
     done: jax.Array,
@@ -187,11 +179,11 @@ def compute_reward(
     the state moves away, with the 1-sigma point set by the sigma_* params.
     """
     dense = (
-        _gauss(next_state.x,     params.sigma_x)
-        * _gauss(next_state.y,     10 * params.sigma_x)
-        * _gauss(next_state.vy,    params.sigma_vy)
-        * _gauss(next_state.vx,    params.sigma_vx)
-        * _gauss(next_state.theta, params.sigma_theta)
+        gauss(next_state.x,     params.sigma_x)
+        * gauss(next_state.y,     10 * params.sigma_x)
+        * gauss(next_state.vy,    params.sigma_vy)
+        * gauss(next_state.vx,    params.sigma_vx)
+        * gauss(next_state.theta, params.sigma_theta)
     )
     success_bonus = jnp.where(done & is_success(next_state, params), params.R_success, 0.0)
     return dense + success_bonus

@@ -260,7 +260,7 @@ def test_evaluate_batched(agent, batch_obs):
 # ---------------------------------------------------------------------------
 
 def test_agent_from_cfg(train_cfg):
-    agent = agent_from_cfg(train_cfg, KEY)
+    agent = agent_from_cfg(train_cfg, KEY, obs_dim=OBS_DIM, action_dim=ACTION_DIM)
     obs = jnp.ones(OBS_DIM)
     action, log_prob, value, entropy = agent.get_action_and_value(obs, KEY)
     assert action.shape == (ACTION_DIM,)

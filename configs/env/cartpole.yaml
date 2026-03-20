@@ -1,0 +1,42 @@
+# CartPole environment / physics configuration
+
+# Physics parameters
+m_cart: 1.0     # kg, cart mass
+m_pole: 0.1     # kg, pole mass
+l: 0.5          # m,  half-pole length (pivot to CoM)
+g: 9.81         # m/s^2
+F_max: 10.0     # N,  maximum applied force magnitude
+dt: 0.02        # s,  Euler timestep (50 Hz)
+
+# Initial conditions
+x0: 0.0         # m,   cart starts at origin
+x_dot0: 0.0     # m/s
+theta0: 0.05    # rad, slight tilt from upright (~3°)
+theta_dot0: 0.0 # rad/s
+
+# Termination thresholds
+x_max: 2.4      # m,   cart boundary (standard CartPole)
+theta_max: 0.2094  # rad, pole falls if |theta| ≥ this (~12°)
+t_max: 10.0     # s,   episode timeout (500 steps at dt=0.02)
+
+# Reward — Gaussian shaping + time penalty + sparse success bonus
+#
+#   r(t) = w_theta * exp(-0.5*(theta/sigma_theta)^2)
+#         + w_x    * exp(-0.5*(x/sigma_x)^2)
+#         - w_time
+#         + R_success   (if done due to timeout — pole survived full episode)
+#
+# Each Gaussian returns 1.0 at the target (upright, centered) and decays
+# smoothly as the state moves away.
+
+# Per-dimension weights
+w_theta: 2.0    # pole angle is the primary objective
+w_x:     0.5    # secondary: keep cart near center
+
+# Per-dimension spreads (1-sigma = value where reward ≈ 0.6)
+sigma_theta: 0.1  # rad — covers most of the allowed range (~0.21 rad max)
+sigma_x:     1.0  # m   — covers half the track (2.4 m max)
+
+# Time penalty and sparse success bonus
+w_time:    0.01
+R_success: 100.0
