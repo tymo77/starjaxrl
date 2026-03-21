@@ -1,0 +1,22 @@
+# Top-level training configuration for CartPole
+defaults:
+  - env: cartpole
+  - ppo: ppo
+  - network: network
+  - _self_
+
+seed: 42
+n_updates: 500           # CartPole converges faster than Starship
+checkpoint_every: 50
+eval_every: 25
+log_every: 10
+
+# No gravity curriculum for CartPole — g is fixed at 9.81 throughout
+curriculum:
+  g_start: 9.81          # same as env.g → no ramping
+  g_updates: 1           # ramp completes immediately
+
+wandb:
+  project: starjaxrl-cartpole
+  entity: null
+  mode: online

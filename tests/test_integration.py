@@ -9,6 +9,13 @@ import jax.numpy as jnp
 import pytest
 from omegaconf import OmegaConf
 
+from starjaxrl.env.starship_env import (
+    StarshipEnv,
+    env_params_from_cfg,
+    get_obs,
+    reset,
+    step as env_step,
+)
 from starjaxrl.training.runner import init_runner, make_train_step
 
 # Use full gravity in unit tests (curriculum is exercised via train() in training)
@@ -47,20 +54,17 @@ def mini_cfg():
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _run_n_updates(cfg, n: int):
-    """Run n training updates and return list of TrainMetrics."""
-    key          = jax.random.PRNGKey(0)
-    runner_state, graphdef, optimizer = init_runner(cfg, key)
-    train_step   = jax.jit(make_train_step(graphdef, optimizer,
-                                           __import__("starjaxrl.env.starship_env",
-                                                      fromlist=["env_params_from_cfg"])
-                                           .env_params_from_cfg(cfg.env),
-                                           cfg))
-    metrics_log = []
-    for _ in range(n):
-        runner_state, metrics = train_step(runner_state, _G)
-        metrics_log.append(metrics)
-    return metrics_log
+def _make_runner_and_step(cfg, key):
+    """Helper: init runner + make jit-compiled train_step for Starship."""
+    env_params = env_params_from_cfg(cfg.env)
+    runner_state, graphdef, optimizer = init_runner(
+        cfg, key, env_params, reset, get_obs,
+        obs_dim=StarshipEnv.OBS_DIM, action_dim=StarshipEnv.ACTION_DIM,
+    )
+    train_step = jax.jit(make_train_step(
+        graphdef, optimizer, env_params, cfg, reset, get_obs, env_step
+    ))
+    return runner_state, train_step
 
 
 # ---------------------------------------------------------------------------
@@ -69,11 +73,7 @@ def _run_n_updates(cfg, n: int):
 
 def test_training_loop_completes(mini_cfg):
     """Full training loop runs 30 updates without crashing."""
-    from starjaxrl.env.starship_env import env_params_from_cfg
-    key = jax.random.PRNGKey(1)
-    runner_state, graphdef, optimizer = init_runner(mini_cfg, key)
-    env_params = env_params_from_cfg(mini_cfg.env)
-    train_step = jax.jit(make_train_step(graphdef, optimizer, env_params, mini_cfg))
+    runner_state, train_step = _make_runner_and_step(mini_cfg, jax.random.PRNGKey(1))
 
     for _ in range(30):
         runner_state, metrics = train_step(runner_state, _G)
@@ -84,11 +84,7 @@ def test_training_loop_completes(mini_cfg):
 
 def test_metrics_finite(mini_cfg):
     """All losses and rewards remain finite throughout training."""
-    from starjaxrl.env.starship_env import env_params_from_cfg
-    key = jax.random.PRNGKey(2)
-    runner_state, graphdef, optimizer = init_runner(mini_cfg, key)
-    env_params = env_params_from_cfg(mini_cfg.env)
-    train_step = jax.jit(make_train_step(graphdef, optimizer, env_params, mini_cfg))
+    runner_state, train_step = _make_runner_and_step(mini_cfg, jax.random.PRNGKey(2))
 
     for _ in range(30):
         runner_state, metrics = train_step(runner_state, _G)
@@ -101,11 +97,7 @@ def test_metrics_finite(mini_cfg):
 
 def test_reward_does_not_collapse(mini_cfg):
     """Mean reward in the last 10 updates is no worse than in the first 10."""
-    from starjaxrl.env.starship_env import env_params_from_cfg
-    key = jax.random.PRNGKey(3)
-    runner_state, graphdef, optimizer = init_runner(mini_cfg, key)
-    env_params = env_params_from_cfg(mini_cfg.env)
-    train_step = jax.jit(make_train_step(graphdef, optimizer, env_params, mini_cfg))
+    runner_state, train_step = _make_runner_and_step(mini_cfg, jax.random.PRNGKey(3))
 
     rewards = []
     for _ in range(30):
@@ -124,11 +116,7 @@ def test_reward_does_not_collapse(mini_cfg):
 
 def test_entropy_decreases(mini_cfg):
     """Policy entropy should trend downward as the agent commits to actions."""
-    from starjaxrl.env.starship_env import env_params_from_cfg
-    key = jax.random.PRNGKey(4)
-    runner_state, graphdef, optimizer = init_runner(mini_cfg, key)
-    env_params = env_params_from_cfg(mini_cfg.env)
-    train_step = jax.jit(make_train_step(graphdef, optimizer, env_params, mini_cfg))
+    runner_state, train_step = _make_runner_and_step(mini_cfg, jax.random.PRNGKey(4))
 
     entropies = []
     for _ in range(30):
@@ -145,12 +133,7 @@ def test_entropy_decreases(mini_cfg):
 
 def test_grad_step_updates_params(mini_cfg):
     """Verifies that a gradient step actually changes the network weights."""
-    from starjaxrl.env.starship_env import env_params_from_cfg
-    import jax
-    key = jax.random.PRNGKey(5)
-    runner_state, graphdef, optimizer = init_runner(mini_cfg, key)
-    env_params = env_params_from_cfg(mini_cfg.env)
-    train_step = jax.jit(make_train_step(graphdef, optimizer, env_params, mini_cfg))
+    runner_state, train_step = _make_runner_and_step(mini_cfg, jax.random.PRNGKey(5))
 
     params_before = jax.tree.map(lambda x: x.copy(), runner_state.agent_state)
     runner_state, _ = train_step(runner_state, _G)

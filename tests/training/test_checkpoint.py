@@ -6,13 +6,18 @@ import pytest
 
 from starjaxrl.training.checkpoint import CheckpointManager, load_checkpoint, save_checkpoint
 from starjaxrl.training.runner import init_runner
+from starjaxrl.env.starship_env import StarshipEnv, env_params_from_cfg, get_obs, reset
 
 KEY = jax.random.PRNGKey(99)
 
 
 @pytest.fixture(scope="module")
 def agent_state(train_cfg):
-    runner_state, _graphdef, _opt = init_runner(train_cfg, KEY)
+    env_params = env_params_from_cfg(train_cfg.env)
+    runner_state, _graphdef, _opt = init_runner(
+        train_cfg, KEY, env_params, reset, get_obs,
+        obs_dim=StarshipEnv.OBS_DIM, action_dim=StarshipEnv.ACTION_DIM,
+    )
     return runner_state.agent_state
 
 

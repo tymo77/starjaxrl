@@ -3,7 +3,7 @@
 import jax
 import pytest
 
-from starjaxrl.env.starship_env import env_params_from_cfg
+from starjaxrl.env.starship_env import StarshipEnv, env_params_from_cfg, get_obs, reset
 from starjaxrl.training.logging import init_logging, log_metrics, run_eval_episode
 from starjaxrl.training.runner import init_runner
 from starjaxrl.agents import TrainMetrics
@@ -13,7 +13,11 @@ KEY = jax.random.PRNGKey(55)
 
 @pytest.fixture(scope="module")
 def runner_and_graphdef(train_cfg):
-    runner_state, graphdef, _ = init_runner(train_cfg, KEY)
+    env_params = env_params_from_cfg(train_cfg.env)
+    runner_state, graphdef, _ = init_runner(
+        train_cfg, KEY, env_params, reset, get_obs,
+        obs_dim=StarshipEnv.OBS_DIM, action_dim=StarshipEnv.ACTION_DIM,
+    )
     return runner_state, graphdef
 
 

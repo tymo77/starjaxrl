@@ -11,9 +11,29 @@ from starjaxrl.training.runner import (
     init_runner,
     make_train_step,
 )
-from starjaxrl.env.starship_env import env_params_from_cfg
+from starjaxrl.env.starship_env import (
+    StarshipEnv,
+    env_params_from_cfg,
+    get_obs,
+    reset,
+    step as env_step,
+)
 
 KEY = jax.random.PRNGKey(7)
+
+
+def _init_starship(cfg, key=KEY):
+    """Helper: init runner for Starship env with updated signature."""
+    env_params = env_params_from_cfg(cfg.env)
+    return init_runner(
+        cfg, key, env_params, reset, get_obs,
+        obs_dim=StarshipEnv.OBS_DIM, action_dim=StarshipEnv.ACTION_DIM,
+    )
+
+
+def _make_step(graphdef, optimizer, env_params, cfg):
+    """Helper: make train_step for Starship env with updated signature."""
+    return make_train_step(graphdef, optimizer, env_params, cfg, reset, get_obs, env_step)
 
 
 # ---------------------------------------------------------------------------
@@ -83,7 +103,7 @@ def test_gae_finite():
 # ---------------------------------------------------------------------------
 
 def test_init_runner(train_cfg):
-    runner_state, graphdef, optimizer = init_runner(train_cfg, KEY)
+    runner_state, graphdef, optimizer = _init_starship(train_cfg)
     n_envs  = int(train_cfg.ppo.n_envs)
     obs_dim = 7  # StarshipEnv.OBS_DIM
 
@@ -94,7 +114,7 @@ def test_init_runner(train_cfg):
 
 
 def test_init_runner_agent_state_finite(train_cfg):
-    runner_state, _, _ = init_runner(train_cfg, KEY)
+    runner_state, _, _ = _init_starship(train_cfg)
     leaves = jax.tree.leaves(runner_state.agent_state)
     for leaf in leaves:
         assert jnp.all(jnp.isfinite(leaf)), "Non-finite agent parameter at init"
@@ -108,8 +128,8 @@ def test_init_runner_agent_state_finite(train_cfg):
 def runner_and_step(train_cfg):
     """Initialise and run one train_step at full Earth gravity."""
     env_params = env_params_from_cfg(train_cfg.env)
-    runner_state, graphdef, optimizer = init_runner(train_cfg, KEY)
-    train_step = jax.jit(make_train_step(graphdef, optimizer, env_params, train_cfg))
+    runner_state, graphdef, optimizer = _init_starship(train_cfg)
+    train_step = jax.jit(_make_step(graphdef, optimizer, env_params, train_cfg))
     current_g = jnp.array(float(train_cfg.env.g), dtype=jnp.float32)
     new_runner, metrics = train_step(runner_state, current_g)
     return runner_state, new_runner, metrics
@@ -163,8 +183,8 @@ def test_train_step_increments_step(runner_and_step):
 def test_multiple_train_steps_stable(train_cfg):
     """Run 5 train steps; losses and rewards must stay finite."""
     env_params = env_params_from_cfg(train_cfg.env)
-    runner_state, graphdef, optimizer = init_runner(train_cfg, KEY)
-    train_step = jax.jit(make_train_step(graphdef, optimizer, env_params, train_cfg))
+    runner_state, graphdef, optimizer = _init_starship(train_cfg)
+    train_step = jax.jit(_make_step(graphdef, optimizer, env_params, train_cfg))
     current_g = jnp.array(float(train_cfg.env.g), dtype=jnp.float32)
 
     for _ in range(5):

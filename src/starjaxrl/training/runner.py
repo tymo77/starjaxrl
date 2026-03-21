@@ -16,14 +16,6 @@ from starjaxrl.agents.ppo import (
     agent_from_cfg,
     compute_gae,
 )
-from starjaxrl.env.starship_env import (
-    EnvParams,
-    env_params_from_cfg,
-    get_obs,
-    reset,
-    step as env_step,
-)
-from starjaxrl.physics import StarshipState
 
 
 # ---------------------------------------------------------------------------
@@ -32,12 +24,12 @@ from starjaxrl.physics import StarshipState
 
 class RunnerState(NamedTuple):
     """Carry for the JAX training loop. All fields are pytree-compatible."""
-    env_states:  StarshipState   # batched: each field shape (N,)
-    obs:         jax.Array       # (N, obs_dim) — current observations
-    agent_state: Any             # nnx.State pytree of parameter arrays
-    opt_state:   Any             # optax optimizer state
-    key:         jax.Array       # PRNG key
-    step:        jax.Array       # int scalar — number of updates so far
+    env_states:  Any           # batched env states (fields shape (N,))
+    obs:         jax.Array     # (N, obs_dim) — current observations
+    agent_state: Any           # nnx.State pytree of parameter arrays
+    opt_state:   Any           # optax optimizer state
+    key:         jax.Array     # PRNG key
+    step:        jax.Array     # int scalar — number of updates so far
 
 
 # ---------------------------------------------------------------------------
@@ -47,13 +39,26 @@ class RunnerState(NamedTuple):
 def make_train_step(
     graphdef:        Any,
     optimizer:       optax.GradientTransformation,
-    base_env_params: EnvParams,
+    base_env_params: Any,
     cfg:             DictConfig,
+    env_reset:       Callable,
+    env_get_obs:     Callable,
+    env_step:        Callable,
 ) -> Callable[[RunnerState, Any], tuple[RunnerState, TrainMetrics]]:
     """Return a jit-able train_step function closed over static config.
 
     The returned function accepts ``current_g`` as its second argument so
     that a gravity curriculum can be applied without recompilation.
+
+    Args:
+        graphdef:        Static NNX graph structure.
+        optimizer:       Optax optimizer.
+        base_env_params: Environment parameters (NamedTuple with a ``g`` field).
+        cfg:             Hydra config.
+        env_reset:       ``reset(key, params) -> state`` function for the env.
+        env_get_obs:     ``get_obs(state) -> obs`` function for the env.
+        env_step:        ``step(state, action, params) -> (state, obs, r, done, info)``
+                         function for the env.
     """
 
     n_envs         = int(cfg.ppo.n_envs)
@@ -104,8 +109,8 @@ def make_train_step(
 
             # Auto-reset episodes that just ended
             rst_keys   = jax.random.split(rst_key, n_envs)
-            fresh_states = jax.vmap(lambda k: reset(k, env_params))(rst_keys)
-            fresh_obs    = jax.vmap(get_obs)(fresh_states)
+            fresh_states = jax.vmap(lambda k: env_reset(k, env_params))(rst_keys)
+            fresh_obs    = jax.vmap(env_get_obs)(fresh_states)
 
             # For done envs: carry fresh state/obs into next step
             env_states_next = jax.tree.map(
@@ -262,22 +267,38 @@ def build_optimizer(cfg: DictConfig, n_updates: int) -> optax.GradientTransforma
     )
 
 
-def init_runner(cfg: DictConfig, key: jax.Array) -> tuple[RunnerState, Any, optax.GradientTransformation]:
+def init_runner(
+    cfg:         DictConfig,
+    key:         jax.Array,
+    env_params:  Any,
+    env_reset:   Callable,
+    env_get_obs: Callable,
+    obs_dim:     int,
+    action_dim:  int,
+) -> tuple[RunnerState, Any, optax.GradientTransformation]:
     """Initialise all training state.
+
+    Args:
+        cfg:         Hydra config.
+        key:         PRNG key.
+        env_params:  Environment parameters (already built from cfg).
+        env_reset:   ``reset(key, params) -> state`` for the env.
+        env_get_obs: ``get_obs(state) -> obs`` for the env.
+        obs_dim:     Observation dimensionality (env-specific).
+        action_dim:  Action dimensionality (env-specific).
 
     Returns:
         runner_state: initial RunnerState
         graphdef:     static NNX graph structure (pass to make_train_step)
         optimizer:    optax optimizer (pass to make_train_step)
     """
-    n_envs      = int(cfg.ppo.n_envs)
-    n_updates   = int(cfg.n_updates)
-    env_params  = env_params_from_cfg(cfg.env)
+    n_envs    = int(cfg.ppo.n_envs)
+    n_updates = int(cfg.n_updates)
 
     key, agent_key, env_key = jax.random.split(key, 3)
 
     # Build agent and split into static graphdef + mutable state
-    agent      = agent_from_cfg(cfg, agent_key)
+    agent      = agent_from_cfg(cfg, agent_key, obs_dim, action_dim)
     graphdef, agent_state = nnx.split(agent)
 
     # Build optimizer and initialise its state
@@ -286,8 +307,8 @@ def init_runner(cfg: DictConfig, key: jax.Array) -> tuple[RunnerState, Any, opta
 
     # Initialise all N environments
     env_keys   = jax.random.split(env_key, n_envs)
-    env_states = jax.vmap(lambda k: reset(k, env_params))(env_keys)
-    obs        = jax.vmap(get_obs)(env_states)          # (N, obs_dim)
+    env_states = jax.vmap(lambda k: env_reset(k, env_params))(env_keys)
+    obs        = jax.vmap(env_get_obs)(env_states)          # (N, obs_dim)
 
     runner_state = RunnerState(
         env_states  = env_states,
@@ -302,15 +323,22 @@ def init_runner(cfg: DictConfig, key: jax.Array) -> tuple[RunnerState, Any, opta
 
 
 # ---------------------------------------------------------------------------
-# Top-level training loop
+# Top-level training loop (Starship)
 # ---------------------------------------------------------------------------
 
 def train(cfg: DictConfig) -> tuple[RunnerState, list[TrainMetrics]]:
-    """Run the full PPO training loop.
+    """Run the full PPO training loop for the Starship environment.
 
     Uses a Python for-loop over jit-compiled train_steps so that
     logging/checkpointing can be interleaved.
     """
+    from starjaxrl.env.starship_env import (
+        env_params_from_cfg,
+        get_obs,
+        reset,
+        step as env_step,
+        StarshipEnv,
+    )
     from starjaxrl.training.checkpoint import CheckpointManager
     from starjaxrl.training.logging import (
         finish_logging,
@@ -331,8 +359,13 @@ def train(cfg: DictConfig) -> tuple[RunnerState, list[TrainMetrics]]:
     g_end      = float(cfg.env.g)
     g_updates  = int(cfg.curriculum.g_updates)
 
-    runner_state, graphdef, optimizer = init_runner(cfg, key)
-    train_step = jax.jit(make_train_step(graphdef, optimizer, base_env_params, cfg))
+    runner_state, graphdef, optimizer = init_runner(
+        cfg, key, base_env_params, reset, get_obs,
+        obs_dim=StarshipEnv.OBS_DIM, action_dim=StarshipEnv.ACTION_DIM,
+    )
+    train_step = jax.jit(make_train_step(
+        graphdef, optimizer, base_env_params, cfg, reset, get_obs, env_step
+    ))
 
     wandb_active = init_logging(cfg)
     ckpt_manager = CheckpointManager(Path("checkpoints"))
