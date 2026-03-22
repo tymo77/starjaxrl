@@ -70,6 +70,64 @@ def finish_logging(wandb_active: bool = False) -> None:
         wandb.finish()
 
 
+def log_trajectory_artifact(
+    states:       list,
+    actions:      list,
+    env_params:   EnvParams,
+    step:         int,
+    wandb_active: bool = False,
+    render_dir:   str  = "renders",
+) -> None:
+    """Render a trajectory GIF and upload it as a W&B artifact.
+
+    Generates an animated playback of the provided trajectory, saves it as a
+    GIF under *render_dir*, and then uploads it to the active W&B run both as
+    a versioned ``Artifact`` (for long-term storage) and as an inline
+    ``wandb.Video`` (for in-run media preview).
+
+    Args:
+        states:       List of ``StarshipState`` objects from an eval episode.
+        actions:      Corresponding list of action arrays.
+        env_params:   Environment parameters used for the episode.
+        step:         Current training update number (used for naming).
+        wandb_active: Whether a W&B run is currently active.
+        render_dir:   Directory in which to save the temporary GIF file.
+    """
+    if not wandb_active:
+        return
+
+    import tempfile
+    from pathlib import Path
+
+    import wandb
+
+    from starjaxrl.utils.visualization import render_trajectory, save_animation
+
+    fig, anim = render_trajectory(states, actions, env_params)
+
+    renders_path = Path(render_dir)
+    renders_path.mkdir(parents=True, exist_ok=True)
+    gif_path = renders_path / f"trajectory_{step:04d}.gif"
+
+    save_animation(anim, gif_path)
+
+    # Upload as a versioned artifact for long-term storage
+    artifact = wandb.Artifact(
+        name=f"trajectory-step-{step:04d}",
+        type="trajectory",
+        description=f"Greedy eval trajectory playback at training update {step}",
+        metadata={"step": step},
+    )
+    artifact.add_file(str(gif_path))
+    wandb.log_artifact(artifact)
+
+    # Also log inline so the GIF is visible in the run's Media panel
+    wandb.log({"eval/trajectory": wandb.Video(str(gif_path), fps=30, format="gif")}, step=step)
+
+    import matplotlib.pyplot as plt
+    plt.close(fig)
+
+
 # ---------------------------------------------------------------------------
 # Greedy evaluation rollout
 # ---------------------------------------------------------------------------

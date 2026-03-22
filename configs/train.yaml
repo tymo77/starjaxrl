@@ -10,6 +10,7 @@ n_updates: 1000          # total number of PPO update steps
 checkpoint_every: 50     # save checkpoint every N updates
 eval_every: 25           # run eval rollout every N updates
 log_every: 10            # log metrics every N updates
+render_interval: 100     # upload trajectory GIF artifact to wandb every N updates (0 = disabled)
 
 # Gravity curriculum: linearly ramp g from g_start → env.g over g_updates steps
 curriculum:

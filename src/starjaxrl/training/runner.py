@@ -344,6 +344,7 @@ def train(cfg: DictConfig) -> tuple[RunnerState, list[TrainMetrics]]:
         finish_logging,
         init_logging,
         log_metrics,
+        log_trajectory_artifact,
         run_eval_episode,
     )
 
@@ -353,6 +354,7 @@ def train(cfg: DictConfig) -> tuple[RunnerState, list[TrainMetrics]]:
     log_every         = int(cfg.log_every)
     checkpoint_every  = int(cfg.checkpoint_every)
     eval_every        = int(cfg.eval_every)
+    render_interval   = int(cfg.get("render_interval", 0))
 
     # Gravity curriculum
     g_start    = float(cfg.curriculum.g_start)
@@ -420,6 +422,18 @@ def train(cfg: DictConfig) -> tuple[RunnerState, list[TrainMetrics]]:
                 )
 
             ckpt_manager.maybe_save_best(runner_state.agent_state, ep_return, step)
+
+        # --- Trajectory render artifact ---
+        if render_interval > 0 and step % render_interval == 0:
+            current_env_params = base_env_params._replace(g=float(current_g))
+            key, render_key = jax.random.split(runner_state.key)
+            render_states, render_acts, _, _ = run_eval_episode(
+                runner_state.agent_state, graphdef, current_env_params, render_key
+            )
+            log_trajectory_artifact(
+                render_states, render_acts, current_env_params, step,
+                wandb_active=wandb_active,
+            )
 
         # --- Periodic checkpoint ---
         if step % checkpoint_every == 0:
