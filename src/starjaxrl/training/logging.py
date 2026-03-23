@@ -10,6 +10,13 @@ import jax.numpy as jnp
 from starjaxrl.agents.ppo import TrainMetrics
 from starjaxrl.env.starship_env import EnvParams, get_obs, is_success, reset, step as env_step
 from starjaxrl.physics import StarshipState
+from starjaxrl.env.cartpole_env import (
+    CartPoleEnvParams,
+    get_obs as cartpole_get_obs,
+    is_success as cartpole_is_success,
+    reset as cartpole_reset,
+    step as cartpole_step,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -174,3 +181,100 @@ def run_eval_episode(
 
     success = bool(is_success(state, env_params))
     return states, actions, success, total_reward
+
+
+# ---------------------------------------------------------------------------
+# CartPole evaluation rollout
+# ---------------------------------------------------------------------------
+
+def run_eval_episode_cartpole(
+    agent_state: Any,
+    graphdef:    Any,
+    env_params:  CartPoleEnvParams,
+    key:         jax.Array,
+    max_steps:   int = 600,
+) -> tuple[list, list[jax.Array], bool, float]:
+    """Run one greedy (mean-action) CartPole episode and return trajectory.
+
+    Returns:
+        states:       list of CartPoleState at each step
+        actions:      list of action arrays
+        success:      whether the pole survived the full episode (timeout)
+        total_reward: cumulative reward
+    """
+    from flax import nnx
+
+    agent = nnx.merge(graphdef, agent_state)
+
+    key, reset_key = jax.random.split(key)
+    state = cartpole_reset(reset_key, env_params)
+
+    states:  list = [state]
+    actions: list[jax.Array] = []
+    total_reward = 0.0
+
+    for _ in range(max_steps):
+        obs = cartpole_get_obs(state)
+        mu, _log_std = agent.actor(obs)
+        action = mu
+
+        state, _obs, reward, done, _info = cartpole_step(state, action, env_params)
+        states.append(state)
+        actions.append(action)
+        total_reward += float(reward)
+
+        if bool(done):
+            break
+
+    success = bool(cartpole_is_success(state, env_params))
+    return states, actions, success, total_reward
+
+
+def log_cartpole_trajectory_artifact(
+    states:       list,
+    actions:      list,
+    env_params:   CartPoleEnvParams,
+    step:         int,
+    wandb_active: bool = False,
+    render_dir:   str  = "renders",
+) -> None:
+    """Render a CartPole trajectory GIF and upload it as a W&B artifact.
+
+    Args:
+        states:       List of CartPoleState objects from an eval episode.
+        actions:      Corresponding list of action arrays.
+        env_params:   CartPoleEnvParams for the episode.
+        step:         Current training update number (used for naming).
+        wandb_active: Whether a W&B run is currently active.
+        render_dir:   Directory in which to save the temporary GIF file.
+    """
+    if not wandb_active:
+        return
+
+    from pathlib import Path
+
+    import wandb
+
+    from starjaxrl.utils.visualization import render_cartpole_trajectory, save_animation
+
+    fig, anim = render_cartpole_trajectory(states, actions, env_params)
+
+    renders_path = Path(render_dir)
+    renders_path.mkdir(parents=True, exist_ok=True)
+    gif_path = renders_path / f"cartpole_{step:04d}.gif"
+
+    save_animation(anim, gif_path)
+
+    artifact = wandb.Artifact(
+        name=f"cartpole-step-{step:04d}",
+        type="trajectory",
+        description=f"CartPole greedy eval trajectory at training update {step}",
+        metadata={"step": step},
+    )
+    artifact.add_file(str(gif_path))
+    wandb.log_artifact(artifact)
+
+    wandb.log({"eval/trajectory": wandb.Video(str(gif_path), fps=30, format="gif")}, step=step)
+
+    import matplotlib.pyplot as plt
+    plt.close(fig)

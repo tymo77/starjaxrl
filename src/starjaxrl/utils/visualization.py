@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Sequence
+from typing import Any, Sequence
 
 import matplotlib
 import matplotlib.animation as animation
@@ -422,6 +422,118 @@ def plot_trajectory(
     fig.savefig(path, dpi=120, bbox_inches="tight", facecolor=_BG_COLOR)
     plt.close(fig)
     print(f"Trajectory plot saved → {path}")
+
+
+# ---------------------------------------------------------------------------
+# CartPole renderer
+# ---------------------------------------------------------------------------
+
+def render_cartpole_frame(
+    ax:         plt.Axes,
+    state:      Any,
+    action:     np.ndarray | None = None,
+    env_params: Any | None = None,
+    track_half: float = 2.6,
+) -> None:
+    """Draw one CartPole frame onto *ax*.
+
+    Args:
+        ax:         Matplotlib axes (cleared each frame by caller).
+        state:      CartPoleState with fields x, theta, time.
+        action:     1-element force array, or None.
+        env_params: CartPoleEnvParams (for track/pole limits display).
+        track_half: Half-width of visible track (m).
+    """
+    ax.set_facecolor(_BG_COLOR)
+
+    x      = float(state.x)
+    theta  = float(state.theta)
+    t      = float(state.time)
+
+    pole_l = float(env_params.l) * 2.0 if env_params is not None else 1.0
+    cart_w, cart_h = 0.3, 0.15
+
+    # Track
+    ax.axhline(0.0, color=_GROUND_COLOR, lw=3, zorder=1)
+    ax.set_xlim(-track_half, track_half)
+    ax.set_ylim(-0.4, pole_l + 0.2)
+
+    # Cart
+    cart_rect = mpatches.FancyBboxPatch(
+        (x - cart_w / 2, -cart_h / 2), cart_w, cart_h,
+        boxstyle="round,pad=0.02",
+        facecolor=_VEHICLE_COLOR, edgecolor="#ffffff", lw=1.0, zorder=3,
+    )
+    ax.add_patch(cart_rect)
+
+    # Pole
+    px = x + pole_l * np.sin(theta)
+    py = cart_h / 2 + pole_l * np.cos(theta)
+    ax.plot([x, px], [cart_h / 2, py], color=_TRAIL_COLOR, lw=4, solid_capstyle="round", zorder=4)
+    ax.plot([px], [py], "o", color=_NOSE_COLOR, ms=6, zorder=5)
+
+    # Force arrow
+    if action is not None:
+        F = float(action[0]) if hasattr(action, "__len__") else float(action)
+        if abs(F) > 0.05:
+            ax.annotate(
+                "", xy=(x + np.sign(F) * (cart_w / 2 + 0.25), 0.0),
+                xytext=(x + np.sign(F) * cart_w / 2, 0.0),
+                arrowprops=dict(arrowstyle="->", color=_PLUME_COLOR, lw=2),
+                zorder=6,
+            )
+
+    # HUD
+    hud = f"t={t:.2f}s  x={x:+.3f}  θ={np.degrees(theta):+.1f}°"
+    if action is not None:
+        F = float(action[0]) if hasattr(action, "__len__") else float(action)
+        hud += f"  F={F:+.1f}N"
+    ax.text(
+        0.01, 0.97, hud,
+        transform=ax.transAxes, va="top", ha="left",
+        fontsize=8, family="monospace", color=_TEXT_COLOR,
+        bbox=dict(facecolor="#00000088", edgecolor="none", pad=2),
+    )
+
+    ax.axis("off")
+
+
+def render_cartpole_trajectory(
+    states:     list,
+    actions:    list,
+    env_params: Any | None = None,
+    figsize:    tuple = (7, 4),
+    fps:        int   = 30,
+) -> tuple:
+    """Build a Matplotlib FuncAnimation for a CartPole trajectory.
+
+    Args:
+        states:     List of CartPoleState objects (length T+1).
+        actions:    List of action arrays (length T).
+        env_params: CartPoleEnvParams for visual scaling.
+        figsize:    Figure size in inches.
+        fps:        Frames per second (for interval calculation).
+
+    Returns:
+        (fig, anim) — Figure and FuncAnimation.
+    """
+    matplotlib.use("Agg")
+    fig, ax = plt.subplots(figsize=figsize, facecolor=_BG_COLOR)
+    ax.set_facecolor(_BG_COLOR)
+
+    n_frames = len(states)
+    # Pad actions so indexing is always valid
+    padded_actions = list(actions) + [actions[-1] if actions else None]
+
+    def _update(i: int) -> None:
+        ax.clear()
+        render_cartpole_frame(ax, states[i], padded_actions[i], env_params)
+
+    anim = animation.FuncAnimation(
+        fig, _update, frames=n_frames,
+        interval=int(1000 / fps), blit=False,
+    )
+    return fig, anim
 
 
 # ---------------------------------------------------------------------------

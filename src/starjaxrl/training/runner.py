@@ -441,3 +441,99 @@ def train(cfg: DictConfig) -> tuple[RunnerState, list[TrainMetrics]]:
 
     finish_logging(wandb_active)
     return runner_state, all_metrics
+
+
+# ---------------------------------------------------------------------------
+# Top-level training loop (CartPole)
+# ---------------------------------------------------------------------------
+
+def train_cartpole(cfg: DictConfig) -> tuple[RunnerState, list[TrainMetrics]]:
+    """Run the full PPO training loop for the CartPole environment."""
+    from starjaxrl.env.cartpole_env import (
+        CartPoleEnv,
+        env_params_from_cfg,
+        get_obs,
+        reset,
+        step as env_step,
+    )
+    from starjaxrl.training.checkpoint import CheckpointManager
+    from starjaxrl.training.logging import (
+        finish_logging,
+        init_logging,
+        log_metrics,
+        log_cartpole_trajectory_artifact,
+        run_eval_episode_cartpole,
+    )
+
+    key              = jax.random.PRNGKey(int(cfg.seed))
+    base_env_params  = env_params_from_cfg(cfg.env)
+    n_updates        = int(cfg.n_updates)
+    log_every        = int(cfg.log_every)
+    checkpoint_every = int(cfg.checkpoint_every)
+    eval_every       = int(cfg.eval_every)
+    render_interval  = int(cfg.get("render_interval", 0))
+
+    runner_state, graphdef, optimizer = init_runner(
+        cfg, key, base_env_params, reset, get_obs,
+        obs_dim=CartPoleEnv.OBS_DIM, action_dim=CartPoleEnv.ACTION_DIM,
+    )
+    train_step = jax.jit(make_train_step(
+        graphdef, optimizer, base_env_params, cfg, reset, get_obs, env_step
+    ))
+
+    wandb_active = init_logging(cfg)
+    ckpt_manager = CheckpointManager(Path("checkpoints"))
+
+    all_metrics: list[TrainMetrics] = []
+
+    # CartPole has no curriculum — g is fixed
+    current_g = jnp.array(float(cfg.env.g), dtype=jnp.float32)
+
+    for update in range(n_updates):
+        runner_state, metrics = train_step(runner_state, current_g)
+        all_metrics.append(metrics)
+        step = update + 1
+
+        if step % log_every == 0:
+            print(
+                f"update {step:4d}/{n_updates} | "
+                f"reward {float(metrics.mean_reward):+.3f} | "
+                f"pg {float(metrics.pg_loss):.4f} | "
+                f"vf {float(metrics.vf_loss):.4f} | "
+                f"ent {float(metrics.entropy):.4f}"
+            )
+
+        if wandb_active and step % log_every == 0:
+            log_metrics(metrics, step, wandb_active=wandb_active)
+
+        if step % eval_every == 0:
+            key, eval_key = jax.random.split(runner_state.key)
+            eval_states, eval_acts, success, ep_return = run_eval_episode_cartpole(
+                runner_state.agent_state, graphdef, base_env_params, eval_key
+            )
+            print(f"  eval | return {ep_return:.2f} | "
+                  f"{'SUCCESS' if success else 'failed'} | steps {len(eval_states)-1}")
+
+            if wandb_active:
+                log_metrics(
+                    metrics, step, wandb_active=wandb_active,
+                    extra={"eval/return": ep_return, "eval/success": float(success)},
+                )
+
+            ckpt_manager.maybe_save_best(runner_state.agent_state, ep_return, step)
+
+        if render_interval > 0 and step % render_interval == 0:
+            key, render_key = jax.random.split(runner_state.key)
+            render_states, render_acts, _, _ = run_eval_episode_cartpole(
+                runner_state.agent_state, graphdef, base_env_params, render_key
+            )
+            log_cartpole_trajectory_artifact(
+                render_states, render_acts, base_env_params, step,
+                wandb_active=wandb_active,
+            )
+
+        if step % checkpoint_every == 0:
+            ckpt_manager.save_periodic(runner_state.agent_state, step)
+
+    finish_logging(wandb_active)
+    return runner_state, all_metrics
