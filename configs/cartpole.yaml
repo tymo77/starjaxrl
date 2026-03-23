@@ -16,6 +16,8 @@ curriculum:
   g_start: 9.81          # same as env.g → no ramping
   g_updates: 1           # ramp completes immediately
 
+render_interval: 50      # Upload trajectory GIF artifact to wandb every 50 updates
+
 wandb:
   project: starjaxrl-cartpole
   entity: null
