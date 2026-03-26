@@ -1,0 +1,16 @@
+# SAC hyperparameters
+
+gamma: 0.99              # discount factor
+tau: 0.005               # soft target network update coefficient
+lr: 3.0e-4               # Adam learning rate (actor, critic, and alpha share this)
+grad_clip: 1.0           # max gradient norm
+
+n_envs: 4                # parallel environments for data collection
+collect_steps: 1         # env steps collected per env per gradient update
+buffer_size: 100000      # replay buffer capacity
+batch_size: 256          # minibatch size for gradient updates
+learning_starts: 1000    # transitions to collect before gradient updates begin
+
+auto_alpha: true         # automatically tune entropy temperature
+alpha_init: 0.2          # initial temperature (also used when auto_alpha=false)
+target_entropy_scale: -1.0  # target entropy = scale * action_dim
