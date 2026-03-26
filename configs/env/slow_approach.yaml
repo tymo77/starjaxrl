@@ -1,0 +1,62 @@
+# Slow-approach problem configuration
+#
+# Goal: starting from the standard Starship initial conditions, slow down and
+# arrive at (x_target, y_target) with near-zero total velocity.
+#
+# The target is included in the 9-D observation so the policy generalises
+# across different target positions.
+
+# --- Vehicle parameters (same Starship hardware) ---
+m_dry: 100000.0        # kg, dry mass
+m_prop_max: 12000.0    # kg, max propellant mass
+T_max: 6000000.0       # N,  max thrust
+Isp: 330.0             # s,  specific impulse
+T_min: 0.4             # minimum throttle fraction
+delta_max: 0.35        # rad, max gimbal angle (~20 deg)
+L: 50.0                # m,  vehicle length
+g: 9.81                # m/s²
+dt: 0.05               # s,  Euler timestep
+
+# --- Initial conditions ---
+x0: 0.0                # m
+y0: 3000.0             # m
+vx0: 0.0               # m/s
+vy0: -80.0             # m/s  (falling at 80 m/s)
+theta0: 1.5708         # rad  (pi/2, belly-down)
+omega0: 0.0            # rad/s
+mprop0: 1.0            # propellant fraction (full)
+
+# --- Target point ---
+# The vehicle must arrive here with near-zero velocity.
+# Placed well above the catch height so there is room to decelerate.
+x_target: 0.0          # m
+y_target: 500.0        # m
+
+# --- Termination thresholds ---
+y_catch: 50.0          # m,   crash / catch-arm level
+x_max: 500.0           # m,   horizontal flight corridor boundary
+theta_max: 4.712       # rad  (3*pi/2), tumbling limit
+t_max: 120.0           # s,   episode timeout
+
+# --- Success tolerances ---
+success_dist_tol: 20.0  # m   — must be within this distance of target
+success_vel_tol:   5.0  # m/s — total speed must be below this at arrival
+
+# --- Reward: Gaussian shaping ---
+#
+#   r(t) = w_dist * exp(-0.5*(dist/sigma_dist)²)
+#         + w_vel  * exp(-0.5*(speed/sigma_vel)²)
+#         - w_time
+#         + R_success   (if done and within tolerances)
+#
+# Sigmas are tuned so gradient signal is present across the full
+# reachable range, not only very close to the target/zero-velocity.
+
+w_dist: 1.0
+w_vel:  1.0
+
+sigma_dist: 100.0      # m   — 1-sigma point where dist reward ≈ 0.6
+sigma_vel:   30.0      # m/s — 1-sigma point where vel  reward ≈ 0.6
+
+w_time:    0.01        # per-step time penalty (encourages efficiency)
+R_success: 100.0       # sparse bonus awarded on successful arrival
