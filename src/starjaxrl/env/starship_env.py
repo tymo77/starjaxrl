@@ -101,7 +101,7 @@ DEFAULT_ENV_PARAMS = EnvParams(
     success_x_tol=1.0, success_vy_tol=2.0, success_vx_tol=1.0,
     success_theta_tol=0.175,
     w_x=1.0, w_vy=1.0, w_vx=0.5, w_theta=1.0,
-    sigma_x=50.0, sigma_vy=30.0, sigma_vx=10.0, sigma_theta=0.5,
+    sigma_x=80.7, sigma_vy=30.0, sigma_vx=10.0, sigma_theta=0.4226,
     w_time=0.01, R_success=100.0,
 )
 
